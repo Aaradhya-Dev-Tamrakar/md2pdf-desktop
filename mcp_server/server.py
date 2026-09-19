@@ -87,8 +87,8 @@ class ConvertInput(BaseModel):
         ),
     )
     margin_mm: int = Field(
-        default=20,
-        description="Page margin in millimeters, applied on all four sides.",
+        default=12,
+        description="Page margin in millimeters, applied on all four sides. Defaults to 12mm narrow margin.",
         ge=0,
         le=100,
     )

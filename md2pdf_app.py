@@ -139,7 +139,7 @@ class MD2PDFApp:
         margin_frame = ttk.Frame(self.root)
         margin_frame.pack(fill="x", padx=10, pady=(0, 6))
         ttk.Label(margin_frame, text="Margins (mm):").pack(side="left")
-        self.margin_var = tk.StringVar(value="20")
+        self.margin_var = tk.StringVar(value="12")
         ttk.Entry(margin_frame, textvariable=self.margin_var, width=5).pack(side="left", padx=6)
 
         # Bottom bar

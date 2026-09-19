@@ -85,20 +85,95 @@ def probe_latex_template():
         return False, str(e)
 
 
+def ascii_grid_to_markdown(block: str) -> str:
+    """Converts an ASCII grid table (with +---+ borders) into a native Markdown pipe table."""
+    lines = [l.strip() for l in block.strip().splitlines() if l.strip()]
+    if not lines or not lines[0].startswith('+') or not lines[-1].startswith('+'):
+        return block
+    rows = []
+    is_grid = True
+    for line in lines:
+        if re.match(r'^\+[-+=|]+\+$', line):
+            continue
+        elif line.startswith('|') and line.endswith('|'):
+            cells = [c.strip() for c in line[1:-1].split('|')]
+            rows.append(cells)
+        else:
+            is_grid = False
+            break
+    if not is_grid or len(rows) < 1:
+        return block
+
+    # Check if first row is a banner/title row (1 single cell)
+    if len(rows) > 1 and len(rows[0]) == 1 and len(rows[1]) > 1:
+        title = rows[0][0]
+        header = rows[1]
+        data_rows = rows[2:]
+        prefix = f"**{title}**\n\n" if title else ""
+    else:
+        prefix = ""
+        header = rows[0]
+        data_rows = rows[1:]
+
+    col_count = len(header)
+    md = [prefix + "| " + " | ".join(header) + " |"]
+    md.append("|" + "|".join([":---" for _ in range(col_count)]) + "|")
+    for r in data_rows:
+        while len(r) < col_count:
+            r.append("")
+        md.append("| " + " | ".join(r[:col_count]) + " |")
+    return "\n".join(md)
+
+
 def clean_markdown_for_pdf(md_content: str, mode: str = "auto") -> str:
     """
     Sanitizes and normalizes markdown for high-quality, bug-free PDF rendering:
-    1. Replaces Unicode emojis that crash pdflatex or render as missing squares.
-    2. Converts Unicode box-drawing characters and geometric symbols into clean ASCII.
-    3. Formats Mermaid graph blocks into readable callout diagram blocks with sanitized characters.
-    4. Converts isolated Unicode math/logic symbols (¬, ∨, ∧, ∞, ε, θ) into LaTeX math mode.
-    5. Normalizes escaped LaTeX delimiters (\\( -> $, \\[ -> $$).
-    6. Strips corrupted encoding artifacts (e.g. \\ufffd).
+    1. Automatically transforms ASCII grid tables (+---+ borders) into native Markdown tables.
+    2. Replaces Unicode emojis that crash pdflatex or render as missing squares.
+    3. Converts Unicode box-drawing characters and geometric symbols into clean ASCII.
+    4. Formats Mermaid graph blocks into readable callout diagram blocks with sanitized characters.
+    5. Converts isolated Unicode math/logic symbols (¬, ∨, ∧, ∞, ε, θ, ·) into LaTeX math mode.
+    6. Normalizes escaped LaTeX delimiters (\\( -> $, \\[ -> $$).
+    7. Strips corrupted encoding artifacts (e.g. \\ufffd).
     """
     if not md_content:
         return ""
 
     text = md_content.replace('\ufffd', '-')
+
+    # Convert ASCII grid code blocks into native Markdown pipe tables
+    def _replace_ascii_tables(match):
+        code_body = match.group(1).strip()
+        lines = [l.strip() for l in code_body.splitlines() if l.strip()]
+        if (
+            lines
+            and lines[0].startswith('+')
+            and lines[-1].startswith('+')
+            and all(l.startswith(('+', '|')) for l in lines)
+        ):
+            converted = ascii_grid_to_markdown(code_body)
+            if converted != code_body:
+                return converted
+        return match.group(0)
+
+    text = re.sub(
+        r'```(?:text|ascii)?\s*\n(\+[-+=|]+\+\n.*?\n\+[-+=|]+\+)\s*\n```',
+        _replace_ascii_tables,
+        text,
+        flags=re.DOTALL,
+    )
+
+    # Convert naked ASCII grid tables (not in code blocks)
+    def _replace_naked_ascii_tables(match):
+        table_text = match.group(1).strip()
+        converted = ascii_grid_to_markdown(table_text)
+        return "\n\n" + converted + "\n\n"
+
+    text = re.sub(
+        r'(?:^|\n)(\+[-+=|]+\+\n(?:[+|].*?\n)+\+[-+=|]+\+)(?=\n|$)',
+        _replace_naked_ascii_tables,
+        text,
+    )
 
     # Common unicode and emoji normalization
     replacements = {
