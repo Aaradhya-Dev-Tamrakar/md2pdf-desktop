@@ -85,23 +85,104 @@ def probe_latex_template():
         return False, str(e)
 
 
+def clean_markdown_for_pdf(md_content: str, mode: str = "auto") -> str:
+    """
+    Sanitizes and normalizes markdown for high-quality, bug-free PDF rendering:
+    1. Replaces Unicode emojis that crash pdflatex or render as missing squares.
+    2. Converts Unicode box-drawing characters and geometric symbols into clean ASCII.
+    3. Formats Mermaid graph blocks into readable callout diagram blocks with sanitized characters.
+    4. Converts isolated Unicode math/logic symbols (¬, ∨, ∧, ∞, ε, θ) into LaTeX math mode.
+    5. Normalizes escaped LaTeX delimiters (\\( -> $, \\[ -> $$).
+    6. Strips corrupted encoding artifacts (e.g. \\ufffd).
+    """
+    if not md_content:
+        return ""
+
+    text = md_content.replace('\ufffd', '-')
+
+    # Common unicode and emoji normalization
+    replacements = {
+        '📂': '[Folder]', '📁': '[Folder]', '🎯': '[Target]', '🎬': '[Video]',
+        '✅': '[OK]', '✔': '[OK]', '❌': '[X]', '⏳': '[Pending]', '🎉': '',
+        '⚠️': '[Warning]', '•': '-', '—': '--', '–': '-',
+        '“': '"', '”': '"', '‘': "'", '’': "'", '°': ' deg',
+        '▲': '^', '▼': 'v', '►': '>', '◄': '<',
+        '│': '|', '─': '-', '┌': '+', '┐': '+', '└': '+', '┘': '+',
+        '├': '+', '┤': '+', '┬': '+', '┴': '+', '┼': '+',
+        '□': '[ ]', '⌊': '[', '⌋': ']', '↓': 'v', '↑': '^',
+    }
+    for k, v in replacements.items():
+        text = text.replace(k, v)
+
+    # Strip remaining 4-byte SMP emojis for LaTeX safety
+    text = re.sub(r'[\U00010000-\U0010ffff]', '', text)
+
+    # Convert Mermaid code fences to clean diagram callouts
+    def _replace_mermaid(match):
+        diagram_code = match.group(1).strip()
+        # Clean logic & math symbols inside mermaid code block to ascii
+        diagram_code = (
+            diagram_code.replace('∨', ' OR ')
+            .replace('∧', ' AND ')
+            .replace('¬', '~')
+            .replace('θ', 'theta')
+            .replace('ε', 'eps')
+            .replace('∞', 'inf')
+        )
+        return f"::: {{.callout}}\n**Diagram (Flowchart):**\n```\n{diagram_code}\n```\n:::"
+
+    text = re.sub(r'```mermaid\s*\n(.*?)\n```', _replace_mermaid, text, flags=re.DOTALL)
+
+    # Clean logic and math symbols outside mermaid
+    text = text.replace('∨', r' $\lor$ ')
+    text = text.replace('∧', r' $\land$ ')
+    text = text.replace('¬', r' $\neg$ ')
+    text = text.replace('∞', r' $\infty$ ')
+    text = text.replace('ε', r' $\varepsilon$ ')
+    text = text.replace('θ', r' $\theta$ ')
+    text = text.replace('·', r' $\cdot$ ')
+
+    # Normalize escaped LaTeX brackets from LLM outputs
+    text = re.sub(r'\\\\\(', '$', text)
+    text = re.sub(r'\\\\\)', '$', text)
+    text = re.sub(r'\\\\\[', '$$', text)
+    text = re.sub(r'\\\\\]', '$$', text)
+
+    return text
+
+
 DEFAULT_CSS = """
 <style>
-body { font-family: Georgia, 'Times New Roman', serif; font-size: 12pt; line-height: 1.55;
-       color: #1a1a1a; max-width: 720px; margin: 0 auto; padding: 10px 20px; }
-h1 { font-size: 18pt; text-align: center; margin-bottom: 4px; }
-h2 { font-size: 13pt; border-bottom: 1px solid #999; padding-bottom: 4px; margin-top: 22px; }
-h3 { font-size: 12pt; margin-top: 16px; }
-p { margin: 6px 0; }
-ul, ol { margin: 6px 0 12px 0; padding-left: 22px; }
-li { margin-bottom: 4px; }
-hr { border: none; border-top: 1px solid #ccc; margin: 14px 0; }
+@page {
+    size: a4 portrait;
+    margin: 0;
+}
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 10pt;
+    line-height: 1.5;
+    color: #1a1a1a;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+h1 { font-size: 16pt; text-align: center; margin-bottom: 6px; color: #b21818; }
+h2 { font-size: 13pt; border-bottom: 1.5px solid #b57c0a; padding-bottom: 3px; margin-top: 18px; color: #b57c0a; }
+h3 { font-size: 11.5pt; margin-top: 14px; color: #1e6e3c; }
+h4 { font-size: 10.5pt; margin-top: 10px; color: #333; }
+p { margin: 5px 0; }
+ul, ol { margin: 4px 0 8px 0; padding-left: 20px; }
+li { margin-bottom: 3px; }
+hr { border: none; border-top: 1px solid #ccc; margin: 12px 0; }
 strong { color: #111; }
-code { background: #f2f2f2; padding: 1px 4px; border-radius: 3px; font-size: 10.5pt; }
-pre { background: #f2f2f2; padding: 10px; border-radius: 4px; overflow-x: auto; }
-table { border-collapse: collapse; width: 100%; margin: 10px 0; }
-th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; }
-th { background: #f2f2f2; }
+code { background: #f2f2f2; padding: 1px 4px; border-radius: 3px; font-family: Consolas, monospace; font-size: 9pt; }
+pre { background: #f8f9fa; border: 1px solid #e2e8f0; padding: 8px 12px; border-radius: 4px; font-family: Consolas, monospace; font-size: 8.5pt; overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 9pt; }
+th, td { border: 1px solid #cbd5e1; padding: 5px 8px; text-align: left; }
+th { background: #f1f5f9; font-weight: 600; }
+img { max-width: 100%; height: auto; }
+.math.display { text-align: center; margin: 8px 0; overflow-x: auto; }
 </style>
 """
 
@@ -109,19 +190,21 @@ th { background: #f2f2f2; }
 # ---------------------------------------------------------------------------
 # Conversion pipelines
 # ---------------------------------------------------------------------------
-def convert_simple(md_content: str, save_path: str, margin: int = 20) -> None:
+def convert_simple(md_content: str, save_path: str, margin: int = 14) -> None:
     """Markdown -> PDF via pandoc (MD -> HTML) -> wkhtmltopdf (HTML -> PDF).
+    Uses full-width responsive print CSS and --webtex for math rendering.
     Raises RuntimeError with the tool's stderr on failure.
     """
+    cleaned = clean_markdown_for_pdf(md_content, mode="simple")
     with tempfile.TemporaryDirectory() as tmp:
         md_file = os.path.join(tmp, "doc.md")
         html_file = os.path.join(tmp, "doc.html")
 
         with open(md_file, "w", encoding="utf-8") as f:
-            f.write(md_content)
+            f.write(cleaned)
 
         result = subprocess.run(
-            ["pandoc", md_file, "-o", html_file, "--standalone"],
+            ["pandoc", md_file, "-o", html_file, "--standalone", "--webtex"],
             capture_output=True, text=True,
         )
         if result.returncode != 0:
@@ -136,6 +219,7 @@ def convert_simple(md_content: str, save_path: str, margin: int = 20) -> None:
         result = subprocess.run(
             [
                 "wkhtmltopdf", "--encoding", "utf-8",
+                "--enable-local-file-access",
                 "--margin-top", f"{margin}mm", "--margin-bottom", f"{margin}mm",
                 "--margin-left", f"{margin}mm", "--margin-right", f"{margin}mm",
                 html_file, save_path,
@@ -146,21 +230,22 @@ def convert_simple(md_content: str, save_path: str, margin: int = 20) -> None:
             raise RuntimeError(f"wkhtmltopdf failed:\n{result.stderr}")
 
 
-def convert_latex(md_content: str, save_path: str, margin: int = 20) -> None:
+def convert_latex(md_content: str, save_path: str, margin: int = 15) -> None:
     """Markdown -> PDF via pandoc's LaTeX writer + pdflatex, using the
     custom styled.latex template (colored heading tiers, tcolorbox
-    callouts, booktabs tables, native math). Supports fenced divs:
-      ::: {.callout} ... :::   -> amber PTR-style box
-      ::: {.answer}  ... :::   -> green answer-summary box
+    callouts, booktabs tables, native math).
+    Automatically sanitizes unsupported Unicode glyphs prior to compilation.
     Raises RuntimeError with the tool's stderr on failure.
     """
     if not os.path.isfile(LATEX_TEMPLATE):
         raise RuntimeError(f"Missing template: {LATEX_TEMPLATE}")
 
+    cleaned = clean_markdown_for_pdf(md_content, mode="latex")
+
     with tempfile.TemporaryDirectory() as tmp:
         md_file = os.path.join(tmp, "doc.md")
         with open(md_file, "w", encoding="utf-8") as f:
-            f.write(md_content)
+            f.write(cleaned)
 
         filter_args = ["--lua-filter", LUA_FILTER] if os.path.isfile(LUA_FILTER) else []
         cmd = (
@@ -179,14 +264,18 @@ def convert_latex(md_content: str, save_path: str, margin: int = 20) -> None:
             raise RuntimeError(f"pandoc/pdflatex failed:\n{result.stderr}")
 
 
-def convert_auto(md_content: str, save_path: str, margin: int = 20):
+def convert_auto(md_content: str, save_path: str, margin: int = 15):
     """Pick LaTeX mode if the content needs it and it's available, else
-    Simple mode. Returns the mode actually used ("latex" or "simple")."""
+    Simple mode. Falls back to Simple mode on pdflatex failure."""
     needed, _reason = detect_latex_needed(md_content)
     tools = check_tools()
-    latex_available = tools["pandoc"] and tools["pdflatex"]
+    latex_available = tools.get("pandoc") and tools.get("pdflatex")
     if needed and latex_available:
-        convert_latex(md_content, save_path, margin)
-        return "latex"
-    convert_simple(md_content, save_path, margin)
+        try:
+            convert_latex(md_content, save_path, margin)
+            return "latex"
+        except Exception:
+            pass
+    convert_simple(md_content, save_path, margin if margin != 15 else 14)
     return "simple"
+

@@ -31,7 +31,12 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from mcp.server.fastmcp import FastMCP
+try:
+    from mcp.server.fastmcp import FastMCP
+    mcp = FastMCP("md2pdf_mcp")
+except (ImportError, ModuleNotFoundError):
+    from mcp.server.mcpserver import MCPServer
+    mcp = MCPServer("md2pdf_mcp")
 from pydantic import BaseModel, Field
 
 from md2pdf import (
@@ -41,8 +46,6 @@ from md2pdf import (
     detect_latex_needed,
     probe_latex_template,
 )
-
-mcp = FastMCP("md2pdf_mcp")
 
 
 class ConversionMode(str, Enum):

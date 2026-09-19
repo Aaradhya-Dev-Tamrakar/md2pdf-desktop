@@ -10,8 +10,20 @@
 \usepackage{mathpazo}
 \usepackage{tcolorbox}
 \usepackage{fancyvrb}
+\usepackage{fvextra}
+\fvset{breaklines=true, breakanywhere=true}
 \usepackage[breaklinks=true,colorlinks=true,linkcolor=blue,urlcolor=blue]{hyperref}
 \tcbuselibrary{skins,breakable}
+\usepackage{calc}
+\usepackage{graphicx}
+\usepackage{caption}
+
+% Fix for pandoc longtable \LTcaptype{none} counter bug
+\newcounter{none}
+
+% Pandoc compatibility macros
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
 
 % ---- Colors matching the reference PDF style ----
 \definecolor{hdred}{RGB}{178,24,24}
