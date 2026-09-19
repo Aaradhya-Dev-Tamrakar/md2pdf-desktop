@@ -14,6 +14,10 @@ import tempfile
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+LATEX_TEMPLATE = os.path.join(SCRIPT_DIR, "templates", "styled.latex")
+LUA_FILTER = os.path.join(SCRIPT_DIR, "templates", "callout-boxes.lua")
+
 DEFAULT_CSS = """
 <style>
 body { font-family: Georgia, 'Times New Roman', serif; font-size: 12pt; line-height: 1.55;
@@ -46,8 +50,11 @@ class MD2PDFApp:
         self._build_ui()
 
     def _check_deps(self):
-        missing = [t for t in ("pandoc", "wkhtmltopdf") if shutil.which(t) is None]
-        self.missing_deps = missing
+        self.have = {t: shutil.which(t) is not None for t in ("pandoc", "wkhtmltopdf", "pdflatex")}
+        # Simple mode needs pandoc+wkhtmltopdf; LaTeX mode needs pandoc+pdflatex.
+        self.simple_ok = self.have["pandoc"] and self.have["wkhtmltopdf"]
+        self.latex_ok = self.have["pandoc"] and self.have["pdflatex"]
+        self.missing_deps = [t for t, ok in self.have.items() if not ok]
 
     def _build_ui(self):
         pad = {"padx": 10, "pady": 6}
@@ -62,12 +69,25 @@ class MD2PDFApp:
         if self.missing_deps:
             warn = ttk.Label(
                 self.root,
-                text=f"⚠ Missing required tools: {', '.join(self.missing_deps)}. "
-                     f"Install them and restart this app.",
+                text=f"⚠ Missing tools: {', '.join(self.missing_deps)}. "
+                     f"Simple mode needs pandoc+wkhtmltopdf; LaTeX mode needs pandoc+pdflatex.",
                 foreground="#b00020",
                 wraplength=720,
             )
             warn.pack(fill="x", padx=10, pady=(0, 6))
+
+        # Conversion mode selector
+        mode_frame = ttk.LabelFrame(self.root, text="Conversion mode")
+        mode_frame.pack(fill="x", padx=10, pady=(0, 6))
+        self.mode_var = tk.StringVar(value="latex" if self.latex_ok else "simple")
+        ttk.Radiobutton(
+            mode_frame, text="Simple (HTML/CSS via wkhtmltopdf)",
+            variable=self.mode_var, value="simple",
+        ).pack(side="left", padx=(8, 4), pady=4)
+        ttk.Radiobutton(
+            mode_frame, text="LaTeX (styled boxes + native math via pdflatex)",
+            variable=self.mode_var, value="latex",
+        ).pack(side="left", padx=4, pady=4)
 
         # Text editor
         editor_frame = ttk.LabelFrame(self.root, text="Markdown content")
@@ -105,11 +125,12 @@ class MD2PDFApp:
         self.file_label.config(text=os.path.basename(path))
 
     def convert(self):
-        if self.missing_deps:
-            messagebox.showerror(
-                "Missing dependencies",
-                f"Install these first: {', '.join(self.missing_deps)}",
-            )
+        mode = self.mode_var.get()
+        if mode == "simple" and not self.simple_ok:
+            messagebox.showerror("Missing dependencies", "Simple mode needs: pandoc, wkhtmltopdf")
+            return
+        if mode == "latex" and not self.latex_ok:
+            messagebox.showerror("Missing dependencies", "LaTeX mode needs: pandoc, pdflatex")
             return
 
         md_content = self.text.get("1.0", "end").strip()
@@ -139,7 +160,10 @@ class MD2PDFApp:
         self.root.update_idletasks()
 
         try:
-            self._run_conversion(md_content, save_path, margin)
+            if mode == "latex":
+                self._run_conversion_latex(md_content, save_path, margin)
+            else:
+                self._run_conversion(md_content, save_path, margin)
             self.status.config(text=f"Saved: {save_path}")
             messagebox.showinfo("Done", f"PDF saved to:\n{save_path}")
         except Exception as e:
@@ -181,6 +205,37 @@ class MD2PDFApp:
             )
             if result.returncode != 0:
                 raise RuntimeError(f"wkhtmltopdf failed:\n{result.stderr}")
+
+    def _run_conversion_latex(self, md_content, save_path, margin):
+        """Markdown -> PDF via pandoc's LaTeX writer + pdflatex, using the
+        custom styled.latex template (colored heading tiers, tcolorbox
+        callouts, booktabs tables, native math). Supports fenced divs:
+          ::: {.callout} ... :::   -> amber PTR-style box
+          ::: {.answer}  ... :::   -> green answer-summary box
+        """
+        if not os.path.isfile(LATEX_TEMPLATE):
+            raise RuntimeError(f"Missing template: {LATEX_TEMPLATE}")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            md_file = os.path.join(tmp, "doc.md")
+            with open(md_file, "w", encoding="utf-8") as f:
+                f.write(md_content)
+
+            filter_args = ["--lua-filter", LUA_FILTER] if os.path.isfile(LUA_FILTER) else []
+            cmd = (
+                ["pandoc", md_file]
+                + filter_args
+                + [
+                    "--template", LATEX_TEMPLATE,
+                    "--pdf-engine", "pdflatex",
+                    "-V", f"margin={margin}",
+                    "-o", save_path,
+                ]
+            )
+
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(f"pandoc/pdflatex failed:\n{result.stderr}")
 
 
 def main():
