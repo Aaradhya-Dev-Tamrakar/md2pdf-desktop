@@ -1,0 +1,7 @@
+# For the MCP server (mcp_server/server.py). The desktop app (md2pdf_app.py)
+# needs no extra Python packages beyond stdlib + Tkinter.
+#
+# Pinned to mcp<2: mcp 2.x renamed FastMCP -> MCPServer with breaking changes.
+# This project uses the FastMCP decorator API throughout.
+mcp[cli]<2
+pydantic>=2
