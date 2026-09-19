@@ -138,8 +138,8 @@ class MD2PDFApp:
         # Margin controls
         margin_frame = ttk.Frame(self.root)
         margin_frame.pack(fill="x", padx=10, pady=(0, 6))
-        ttk.Label(margin_frame, text="Margins (mm):").pack(side="left")
-        self.margin_var = tk.StringVar(value="12")
+        ttk.Label(margin_frame, text="Margins:").pack(side="left")
+        self.margin_var = tk.StringVar(value="0.5in")
         ttk.Entry(margin_frame, textvariable=self.margin_var, width=5).pack(side="left", padx=6)
 
         # Bottom bar
@@ -206,10 +206,7 @@ class MD2PDFApp:
             messagebox.showwarning("Empty content", "There is no Markdown content to convert.")
             return
 
-        try:
-            margin = int(self.margin_var.get())
-        except ValueError:
-            margin = 20
+        margin = self.margin_var.get().strip() or "0.5in"
 
         default_name = "output.pdf"
         if self.md_path:

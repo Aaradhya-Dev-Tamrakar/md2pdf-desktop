@@ -16,10 +16,10 @@ Both surfaces share a unified conversion core (`md2pdf/core.py`), ensuring ident
 
 - **LaTeX (Default & Recommended)** — `pandoc` (MD → LaTeX, via `md2pdf/templates/styled.latex`) → `pdflatex`.
   - Native vector math equations (matrices, sums, Greek characters, calculus, logic proofs).
-  - Colored heading tiers (Red H1, Amber H2, Green H3).
-  - `tcolorbox`-styled callout and answer boxes.
+  - Formal plain black and white academic typography (clean black headings, monochrome borders, zero distracting colors).
+  - Clean grayscale `tcolorbox`-styled callout and answer boxes with `hidelinks` hyperref.
   - Automatically wraps long code/verbatim lines with `fvextra` (`fontsize=\footnotesize, breaklines=true, breakanywhere=true`) so contents **never overflow the page margins**.
-  - Default **12mm narrow margins** providing 186mm of clean printable width on A4.
+  - Default **0.5 in (12.7mm) narrow margins** maximizing usable printable width on A4.
 - **Simple** — `pandoc` (MD → HTML) → `wkhtmltopdf` (HTML → PDF, UTF-8 explicit).
   - Uses full-width responsive print CSS (zero container margin doubling).
   - Includes `--webtex` so mathematical formulas render as vector images instead of unrendered LaTeX code.

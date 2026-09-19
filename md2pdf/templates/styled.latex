@@ -1,5 +1,5 @@
 \documentclass[11pt]{article}
-\usepackage[a4paper,margin=$margin$mm]{geometry}
+\usepackage[a4paper,margin=$if(margin)$$margin$$else$0.5in$endif$]{geometry}
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs}
 \usepackage{array}
@@ -15,7 +15,7 @@
 \RecustomVerbatimEnvironment{verbatim}{Verbatim}{breaklines=true, breakanywhere=true, fontsize=\footnotesize}
 \providecommand{\DefineVerbatimEnvironment}{}
 \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines=true, breakanywhere=true, fontsize=\footnotesize, commandchars=\\\{\}}
-\usepackage[breaklinks=true,colorlinks=true,linkcolor=blue,urlcolor=blue]{hyperref}
+\usepackage[hidelinks]{hyperref}
 \tcbuselibrary{skins,breakable}
 \usepackage{calc}
 \usepackage{graphicx}
@@ -28,35 +28,32 @@
 \providecommand{\tightlist}{%
   \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
 
-% ---- Colors matching the reference PDF style ----
-\definecolor{hdred}{RGB}{178,24,24}
-\definecolor{hdyellow}{RGB}{181,124,10}
-\definecolor{hdgreen}{RGB}{30,110,60}
-\definecolor{boxbg}{RGB}{250,246,232}
-\definecolor{boxline}{RGB}{181,124,10}
-\definecolor{ansbg}{RGB}{237,246,239}
-\definecolor{ansline}{RGB}{30,120,60}
+% ---- Formal Black & White / Grayscale Palette ----
+\definecolor{boxbg}{gray}{0.97}
+\definecolor{boxline}{gray}{0.25}
+\definecolor{ansbg}{gray}{0.94}
+\definecolor{ansline}{gray}{0.15}
 
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{4pt}
 
-% ---- Callout box environment, triggered by a fenced div .callout in the markdown ----
+% ---- Formal Callout box environment (plain monochrome) ----
 \newtcolorbox{calloutbox}{
-  colback=boxbg, colframe=boxline, boxrule=0.6pt,
-  arc=1.5pt, left=6pt, right=6pt, top=4pt, bottom=4pt,
+  colback=boxbg, colframe=boxline, boxrule=0.5pt,
+  arc=1pt, left=6pt, right=6pt, top=4pt, bottom=4pt,
   breakable
 }
 \newtcolorbox{answerbox}{
-  colback=ansbg, colframe=ansline, boxrule=0.6pt,
-  arc=1.5pt, left=8pt, right=8pt, top=5pt, bottom=5pt,
+  colback=ansbg, colframe=ansline, boxrule=0.5pt,
+  arc=1pt, left=8pt, right=8pt, top=5pt, bottom=5pt,
   breakable
 }
 
-% Heading color cycling: h1 red, h2 amber, h3 green — matches the unit-banner style
+% Formal Black Headings
 \usepackage{titlesec}
-\titleformat{\section}{\Large\bfseries\color{hdred}}{}{0pt}{}
-\titleformat{\subsection}{\large\bfseries\color{hdyellow}}{}{0pt}{}
-\titleformat{\subsubsection}{\normalsize\bfseries\color{hdgreen}}{}{0pt}{}
+\titleformat{\section}{\Large\bfseries\color{black}}{}{0pt}{}
+\titleformat{\subsection}{\large\bfseries\color{black}}{}{0pt}{}
+\titleformat{\subsubsection}{\normalsize\bfseries\color{black}}{}{0pt}{}
 
 \title{$if(title)$$title$$endif$}
 \author{$if(author)$$author$$endif$}

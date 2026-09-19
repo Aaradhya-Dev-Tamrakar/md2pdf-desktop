@@ -74,7 +74,7 @@ def probe_latex_template():
                 "pandoc", md_file,
                 "--template", LATEX_TEMPLATE,
                 "--pdf-engine", "pdflatex",
-                "-V", "margin=20",
+                "-V", "margin=0.5in",
                 "-o", pdf_file,
             ]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
@@ -236,41 +236,51 @@ body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     font-size: 10pt;
     line-height: 1.5;
-    color: #1a1a1a;
+    color: #000000;
     width: 100% !important;
     max-width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
 }
-h1 { font-size: 16pt; text-align: center; margin-bottom: 6px; color: #b21818; }
-h2 { font-size: 13pt; border-bottom: 1.5px solid #b57c0a; padding-bottom: 3px; margin-top: 18px; color: #b57c0a; }
-h3 { font-size: 11.5pt; margin-top: 14px; color: #1e6e3c; }
-h4 { font-size: 10.5pt; margin-top: 10px; color: #333; }
-p { margin: 5px 0; }
+h1 { font-size: 16pt; text-align: center; margin-bottom: 6px; color: #000000; font-weight: 700; }
+h2 { font-size: 13pt; border-bottom: 1.5px solid #000000; padding-bottom: 3px; margin-top: 18px; color: #000000; font-weight: 700; }
+h3 { font-size: 11.5pt; margin-top: 14px; color: #000000; font-weight: 600; }
+h4 { font-size: 10.5pt; margin-top: 10px; color: #000000; font-weight: 600; }
+p { margin: 5px 0; color: #000000; }
 ul, ol { margin: 4px 0 8px 0; padding-left: 20px; }
 li { margin-bottom: 3px; }
-hr { border: none; border-top: 1px solid #ccc; margin: 12px 0; }
-strong { color: #111; }
-code { background: #f2f2f2; padding: 1px 4px; border-radius: 3px; font-family: Consolas, monospace; font-size: 8.5pt; }
-pre { background: #f8f9fa; border: 1px solid #e2e8f0; padding: 8px 12px; border-radius: 4px; font-family: Consolas, monospace; font-size: 8pt; white-space: pre-wrap; word-wrap: break-word; word-break: break-word; }
+hr { border: none; border-top: 1px solid #333333; margin: 12px 0; }
+strong { color: #000000; font-weight: 700; }
+code { background: #f4f4f4; border: 1px solid #ddd; padding: 1px 4px; border-radius: 2px; font-family: Consolas, monospace; font-size: 8.5pt; color: #000000; }
+pre { background: #f8f8f8; border: 1px solid #333333; padding: 8px 12px; border-radius: 2px; font-family: Consolas, monospace; font-size: 8pt; white-space: pre-wrap; word-wrap: break-word; word-break: break-word; color: #000000; }
 table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 8.5pt; table-layout: auto; word-wrap: break-word; }
-th, td { border: 1px solid #cbd5e1; padding: 5px 8px; text-align: left; }
-th { background: #f1f5f9; font-weight: 600; }
+th, td { border: 1px solid #000000; padding: 5px 8px; text-align: left; }
+th { background: #f0f0f0; font-weight: 600; color: #000000; }
 img { max-width: 100%; height: auto; }
-.math.display { text-align: center; margin: 8px 0; overflow-x: auto; }
+a { color: #000000; text-decoration: underline; }
+.math.display { text-align: center; margin: 8px 0; overflow-x: auto; color: #000000; }
 </style>
 """
+
+
+def _normalize_margin(margin) -> str:
+    """Normalizes margin parameter to a valid string with units (e.g. '0.5in', '12mm')."""
+    s = str(margin).strip()
+    if s.replace('.', '', 1).isdigit():
+        return f"{s}mm"
+    return s
 
 
 # ---------------------------------------------------------------------------
 # Conversion pipelines
 # ---------------------------------------------------------------------------
-def convert_simple(md_content: str, save_path: str, margin: int = 12) -> None:
+def convert_simple(md_content: str, save_path: str, margin: str = "0.5in") -> None:
     """Markdown -> PDF via pandoc (MD -> HTML) -> wkhtmltopdf (HTML -> PDF).
-    Uses full-width responsive print CSS and --webtex for math rendering.
+    Uses full-width responsive print CSS, formal black & white palette, and --webtex.
     Raises RuntimeError with the tool's stderr on failure.
     """
     cleaned = clean_markdown_for_pdf(md_content, mode="simple")
+    margin_str = _normalize_margin(margin)
     with tempfile.TemporaryDirectory() as tmp:
         md_file = os.path.join(tmp, "doc.md")
         html_file = os.path.join(tmp, "doc.html")
@@ -295,8 +305,8 @@ def convert_simple(md_content: str, save_path: str, margin: int = 12) -> None:
             [
                 "wkhtmltopdf", "--encoding", "utf-8",
                 "--enable-local-file-access",
-                "--margin-top", f"{margin}mm", "--margin-bottom", f"{margin}mm",
-                "--margin-left", f"{margin}mm", "--margin-right", f"{margin}mm",
+                "--margin-top", margin_str, "--margin-bottom", margin_str,
+                "--margin-left", margin_str, "--margin-right", margin_str,
                 html_file, save_path,
             ],
             capture_output=True, text=True,
@@ -305,10 +315,10 @@ def convert_simple(md_content: str, save_path: str, margin: int = 12) -> None:
             raise RuntimeError(f"wkhtmltopdf failed:\n{result.stderr}")
 
 
-def convert_latex(md_content: str, save_path: str, margin: int = 12) -> None:
+def convert_latex(md_content: str, save_path: str, margin: str = "0.5in") -> None:
     """Markdown -> PDF via pandoc's LaTeX writer + pdflatex, using the
-    custom styled.latex template (colored heading tiers, tcolorbox
-    callouts, booktabs tables, native math).
+    custom styled.latex template (formal black & white typography, monochrome
+    tcolorbox callouts, booktabs tables, native math).
     Automatically sanitizes unsupported Unicode glyphs prior to compilation.
     Raises RuntimeError with the tool's stderr on failure.
     """
@@ -316,6 +326,7 @@ def convert_latex(md_content: str, save_path: str, margin: int = 12) -> None:
         raise RuntimeError(f"Missing template: {LATEX_TEMPLATE}")
 
     cleaned = clean_markdown_for_pdf(md_content, mode="latex")
+    margin_str = _normalize_margin(margin)
 
     with tempfile.TemporaryDirectory() as tmp:
         md_file = os.path.join(tmp, "doc.md")
@@ -329,7 +340,7 @@ def convert_latex(md_content: str, save_path: str, margin: int = 12) -> None:
             + [
                 "--template", LATEX_TEMPLATE,
                 "--pdf-engine", "pdflatex",
-                "-V", f"margin={margin}",
+                "-V", f"margin={margin_str}",
                 "-o", save_path,
             ]
         )
@@ -338,7 +349,7 @@ def convert_latex(md_content: str, save_path: str, margin: int = 12) -> None:
             raise RuntimeError(f"pandoc/pdflatex failed:\n{result.stderr}")
 
 
-def convert_auto(md_content: str, save_path: str, margin: int = 12):
+def convert_auto(md_content: str, save_path: str, margin: str = "0.5in"):
     """Pick LaTeX mode if the content needs it and it's available, else
     Simple mode. Falls back to Simple mode on pdflatex failure."""
     needed, _reason = detect_latex_needed(md_content)
