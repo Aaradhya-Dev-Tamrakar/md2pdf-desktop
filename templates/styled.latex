@@ -11,7 +11,10 @@
 \usepackage{tcolorbox}
 \usepackage{fancyvrb}
 \usepackage{fvextra}
-\fvset{breaklines=true, breakanywhere=true}
+\fvset{breaklines=true, breakanywhere=true, fontsize=\footnotesize}
+\RecustomVerbatimEnvironment{verbatim}{Verbatim}{breaklines=true, breakanywhere=true, fontsize=\footnotesize}
+\providecommand{\DefineVerbatimEnvironment}{}
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines=true, breakanywhere=true, fontsize=\footnotesize, commandchars=\\\{\}}
 \usepackage[breaklinks=true,colorlinks=true,linkcolor=blue,urlcolor=blue]{hyperref}
 \tcbuselibrary{skins,breakable}
 \usepackage{calc}

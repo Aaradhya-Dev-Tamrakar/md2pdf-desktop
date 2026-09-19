@@ -176,9 +176,9 @@ ul, ol { margin: 4px 0 8px 0; padding-left: 20px; }
 li { margin-bottom: 3px; }
 hr { border: none; border-top: 1px solid #ccc; margin: 12px 0; }
 strong { color: #111; }
-code { background: #f2f2f2; padding: 1px 4px; border-radius: 3px; font-family: Consolas, monospace; font-size: 9pt; }
-pre { background: #f8f9fa; border: 1px solid #e2e8f0; padding: 8px 12px; border-radius: 4px; font-family: Consolas, monospace; font-size: 8.5pt; overflow-x: auto; }
-table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 9pt; }
+code { background: #f2f2f2; padding: 1px 4px; border-radius: 3px; font-family: Consolas, monospace; font-size: 8.5pt; }
+pre { background: #f8f9fa; border: 1px solid #e2e8f0; padding: 8px 12px; border-radius: 4px; font-family: Consolas, monospace; font-size: 8pt; white-space: pre-wrap; word-wrap: break-word; word-break: break-word; }
+table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 8.5pt; table-layout: auto; word-wrap: break-word; }
 th, td { border: 1px solid #cbd5e1; padding: 5px 8px; text-align: left; }
 th { background: #f1f5f9; font-weight: 600; }
 img { max-width: 100%; height: auto; }
@@ -190,7 +190,7 @@ img { max-width: 100%; height: auto; }
 # ---------------------------------------------------------------------------
 # Conversion pipelines
 # ---------------------------------------------------------------------------
-def convert_simple(md_content: str, save_path: str, margin: int = 14) -> None:
+def convert_simple(md_content: str, save_path: str, margin: int = 12) -> None:
     """Markdown -> PDF via pandoc (MD -> HTML) -> wkhtmltopdf (HTML -> PDF).
     Uses full-width responsive print CSS and --webtex for math rendering.
     Raises RuntimeError with the tool's stderr on failure.
@@ -230,7 +230,7 @@ def convert_simple(md_content: str, save_path: str, margin: int = 14) -> None:
             raise RuntimeError(f"wkhtmltopdf failed:\n{result.stderr}")
 
 
-def convert_latex(md_content: str, save_path: str, margin: int = 15) -> None:
+def convert_latex(md_content: str, save_path: str, margin: int = 12) -> None:
     """Markdown -> PDF via pandoc's LaTeX writer + pdflatex, using the
     custom styled.latex template (colored heading tiers, tcolorbox
     callouts, booktabs tables, native math).
@@ -258,13 +258,12 @@ def convert_latex(md_content: str, save_path: str, margin: int = 15) -> None:
                 "-o", save_path,
             ]
         )
-
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(f"pandoc/pdflatex failed:\n{result.stderr}")
 
 
-def convert_auto(md_content: str, save_path: str, margin: int = 15):
+def convert_auto(md_content: str, save_path: str, margin: int = 12):
     """Pick LaTeX mode if the content needs it and it's available, else
     Simple mode. Falls back to Simple mode on pdflatex failure."""
     needed, _reason = detect_latex_needed(md_content)
@@ -276,6 +275,6 @@ def convert_auto(md_content: str, save_path: str, margin: int = 15):
             return "latex"
         except Exception:
             pass
-    convert_simple(md_content, save_path, margin if margin != 15 else 14)
+    convert_simple(md_content, save_path, margin)
     return "simple"
 
