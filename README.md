@@ -1,135 +1,91 @@
 # Markdown → PDF Converter (`md2pdf-desktop`)
 
-An intelligent, publication-grade Markdown to PDF converter with native mathematical typesetting, automatic ASCII grid table transformation, colored callout boxes, and full UTF-8 Unicode sanitization.
+An intelligent, publication-grade Markdown to PDF converter with native mathematical typesetting, full vector Mermaid diagrams, GitHub Flavored Markdown (GFM) alerts, automatic table formatting, and modern IDE sidebar visual fidelity.
 
-Two ways to use this:
+Three operational surfaces:
 
-- **Desktop app** (`md2pdf_app.py`) — a responsive Tkinter GUI you run and drive by hand.
-- **MCP server** (`mcp_server/server.py`) — the same conversion exposed as Model Context Protocol (MCP) tools, callable by Claude (Desktop/Code) or Google Antigravity.
-- **PowerShell Sync Engine** (`sync.ps1`) — automated git synchronization, pre-commit secret scanning, and toolchain health validation.
+- **Desktop Studio** ([`md2pdf_app.py`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/md2pdf_app.py)) — A modern desktop GUI built with `ui-ux-pro-max` design standards, live toolchain telemetry, real-time syntax auto-detection, and document metrics.
+- **MCP Server** ([`mcp_server/server.py`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/mcp_server/server.py)) — FastMCP server exposing headless conversion tools to Google Antigravity, Claude Code, and Claude Desktop.
+- **PowerShell Sync Engine** ([`sync.ps1`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/sync.ps1)) — Automated git synchronization, pre-commit secret scanning, and toolchain health validation.
 
-Both surfaces share a unified conversion core (`md2pdf/core.py`), ensuring identical, textbook-grade output everywhere.
-
----
-
-## Conversion Modes
-
-- **LaTeX (Default & Recommended)** — `pandoc` (MD → LaTeX, via `md2pdf/templates/styled.latex`) → `pdflatex`.
-  - Native vector math equations (matrices, sums, Greek characters, calculus, logic proofs).
-  - Formal plain black and white academic typography (clean black headings, monochrome borders, zero distracting colors).
-  - Clean grayscale `tcolorbox`-styled callout and answer boxes with `hidelinks` hyperref.
-  - Automatically wraps long code/verbatim lines with `fvextra` (`fontsize=\footnotesize, breaklines=true, breakanywhere=true`) so contents **never overflow the page margins**.
-  - Default **0.5 in (12.7mm) narrow margins** maximizing usable printable width on A4.
-- **Simple** — `pandoc` (MD → HTML) → `wkhtmltopdf` (HTML → PDF, UTF-8 explicit).
-  - Uses full-width responsive print CSS (zero container margin doubling).
-  - Includes `--webtex` so mathematical formulas render as vector images instead of unrendered LaTeX code.
-- **Auto** — Content-aware backend selector. Scans Markdown for mathematical symbols (`$...$`, `$$...$$`, `\(...\)`, `\[...\]`) or callout divs (`::: {.callout}`) and automatically selects LaTeX mode if dependencies exist, with seamless fallback to Simple mode.
+All surfaces share a unified conversion core ([`md2pdf/core.py`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/md2pdf/core.py)), ensuring identical, textbook-grade output everywhere.
 
 ---
 
-## Intelligent Preprocessing Pipeline (`clean_markdown_for_pdf`)
+## 🚀 Conversion Engines
 
-Before sending Markdown to `pdflatex` or `wkhtmltopdf`, `md2pdf` automatically sanitizes the document:
+### 1. 🌟 Sidebar Mode (Default & Recommended)
+**Pipeline:** `pandoc` (MD → HTML5 AST) → Injected KaTeX + Mermaid.js → Headless Chromium (Google Chrome / Microsoft Edge) → Vector PDF.
 
-1. **ASCII Grid Tables $\to$ Native Markdown Tables**:
-   Detects ASCII box tables (`+---+---+` and `| ... |`) and transforms them into responsive Markdown pipe tables. In LaTeX mode, these compile into clean `booktabs` / `longtable` environments that wrap text within cell columns.
-2. **Unicode Math & Logic Symbol Translation**:
-   Converts isolated Unicode logic and Greek glyphs that cause `pdflatex` 8-bit crashes into proper LaTeX math mode (`∨` $\to$ `$\lor$`, `∧` $\to$ `$\land$`, `¬` $\to$ `$\neg$`, `∞` $\to$ `$\infty$`, `ε` $\to$ `$\varepsilon$`, `θ` $\to$ `$\theta$`, `·` $\to$ `$\cdot$`).
-3. **Mermaid Flowchart Blocks**:
-   Automatically detects ```` ```mermaid ```` code blocks, sanitizes inner node labels, and wraps them into styled callout diagram blocks (`::: {.callout}`).
-4. **Emoji Normalization**:
-   Replaces 4-byte SMP emojis that cause missing tofu boxes or TeX fatal errors with clean text badges (`[OK]`, `[Target]`, `[Folder]`, `[Warning]`).
-5. **LaTeX Delimiter Normalization**:
-   Normalizes LLM escaped math delimiters (`\\(` $\to$ `$`, `\\[` $\to$ `$$`).
-6. **Corrupted Encoding Stripping**:
-   Safely replaces `\ufffd` replacement characters with hyphens.
+- **Visual Match**: Renders Markdown with visual fidelity matching the modern IDE Markdown preview sidebar (Google Antigravity, VS Code, GitHub).
+- **Mermaid Vector Diagrams**: Renders ```` ```mermaid ```` flowcharts, sequence diagrams, and state charts directly into vector SVGs.
+- **Crisp KaTeX Math**: Renders both inline `$ ... $` and display `$$ ... $$` formulas (matrices, fractions, Greek letters, integrals) without blurry bitmap rasterization.
+- **GFM Alert Callouts**: Transforms `> [!TIP]`, `> [!NOTE]`, `> [!WARNING]`, `> [!IMPORTANT]`, and `> [!CAUTION]` into styled boxes with themed accent borders, background tints, and icons.
+- **Dual Themes**:
+  - **Light Mode (`theme="light"`, Default)**: Pure white canvas (`#ffffff`), dark slate typography (`#111827`), blue question accents (`#1d4ed8`), violet algorithm headers (`#7c3aed`), and light-themed diagram nodes. Ideal for physical paper printing.
+  - **Dark Mode (`theme="dark"`)**: Deep zinc palette (`#18181b`) matching dark IDE preview panels.
+- **Smart Page-Break Rules**: Prevents breaking inside math blocks, tables, code listings, and flowchart diagrams.
+- **Zero Heavy TeX Overhead**: Uses the Google Chrome or Microsoft Edge executable already installed on your system.
 
----
+### 2. 📐 LaTeX Formal Mode
+**Pipeline:** `pandoc` (MD → LaTeX, via `md2pdf/templates/styled.latex`) → `pdflatex`.
 
-## Requirements & Toolchain
+- Native vector LaTeX typesetting with `mathpazo` Palatino typography.
+- Monochrome `tcolorbox`-styled callouts (`::: {.callout}`, `::: {.answer}`) and `booktabs` tables.
+- Hard line wrapping via `fvextra` (`fontsize=\footnotesize, breaklines=true`) preventing page overflows.
+- Default 12.7mm (0.5 in) margins.
 
-- **Python 3.8+**
-- **pandoc** (required for both modes)
-- **pdflatex** — LaTeX distribution (TeX Live or MiKTeX). Required packages: `amsmath`, `amssymb`, `booktabs`, `longtable`, `xcolor`, `enumitem`, `mathpazo`, `tcolorbox`, `fancyvrb`, `fvextra`, `calc`, `graphicx`, `caption`, `titlesec`, `hyperref`.
-- **wkhtmltopdf** (Simple mode fallback)
-- Desktop app only: `tkinter`
-- MCP server only: `pip install -r requirements.txt` (`mcp[cli]<2`, `pydantic`)
+### 3. ⚡ Simple Mode
+**Pipeline:** `pandoc` (MD → HTML) → `wkhtmltopdf`.
 
-### Installation
+- Fast, lightweight HTML/CSS print engine with `--webtex` formula rendering.
 
-**Windows** (via [Chocolatey](https://chocolatey.org)):
-```powershell
-choco install pandoc wkhtmltopdf
-# For LaTeX mode, install TeX Live or MiKTeX:
-choco install miktex
-```
-
-**macOS** (via Homebrew):
-```bash
-brew install pandoc wkhtmltopdf
-brew install --cask mactex-no-gui
-```
-
-**Linux (Debian/Ubuntu):**
-```bash
-sudo apt update
-sudo apt install pandoc wkhtmltopdf texlive-latex-extra texlive-fonts-recommended python3-tk
-```
+### 4. 🧠 Auto Mode
+Content-aware backend selector. Inspects Markdown content:
+- If Mermaid diagrams or GFM alerts are detected $\to$ routes to **Sidebar** mode.
+- If complex LaTeX math or callout divs are detected $\to$ routes to **Sidebar** (if Chromium present) or **LaTeX** (if `pdflatex` present).
+- Otherwise falls back to **Simple** mode.
 
 ---
 
-## Automated Git & Health Sync (`sync.ps1`)
+## 🎨 Desktop Studio GUI (`md2pdf_app.py`)
 
-The repository includes an automated synchronization script matching the Super-NLM git engine:
-
-```powershell
-# Routine synchronization: pull, security scan, auto-generate conventional commit, and push
-.\sync.ps1
-
-# Run toolchain telemetry and compile probe on styled.latex
-.\sync.ps1 -CheckTools
-
-# Display repository health and commits ahead/behind
-.\sync.ps1 -Status
-
-# Dry-run preview without modifying git state
-.\sync.ps1 -WhatIf
-
-# Custom commit message
-.\sync.ps1 -m "feat(core): enhance table parser"
-```
-
----
-
-## Option A: Desktop App
-
+Run the desktop application:
 ```powershell
 python md2pdf_app.py
 ```
 
-- Live dependency checking and real template probe compilation at startup.
-- Real-time content scanning for math notation.
-- Configurable margin input (defaults to narrow **12mm**).
-- Direct file open and conversion output logging.
+### Studio Highlights
+- **`ui-ux-pro-max` Dark Palette**: Deep canvas (`#080c16`), elevated card containers (`#0f172a`), subtle slate borders (`#1e293b`), and vibrant accents.
+- **Toolchain Telemetry Badges**: Header pills showing live availability for `Chromium`, `Pandoc`, `LaTeX`, and `wkhtmltopdf`.
+- **Dynamic Syntax Auto-Detector**: Automatically analyzes editor text and informs you why a specific engine was chosen.
+- **Live Document Stats**: Tracks line count, word count, character count, and file size in real time.
+- **Quick Action Bar**: `📂 Open .md File`, `📋 Paste Clipboard`, `🧹 Clear`, and active file badge.
+- **Export Presets & Automation**: Quick margin dropdown (`10mm`, `14mm`, `20mm`, `0.5in`), auto-open PDF on completion, and `📁 Show in Folder` shortcut.
 
 ---
 
-## Option B: MCP Server (Claude, Antigravity)
+## 🤖 Model Context Protocol (MCP) Server
 
-Install dependencies:
+The MCP server allows AI coding agents in Google Antigravity or Claude Desktop to convert Markdown files to PDF autonomously.
+
+### Start Standalone:
 ```powershell
-pip install -r requirements.txt
+python mcp_server/server.py
 ```
 
-### Tools Exposed
+### Tools Exposed:
+1. **`convert_markdown_to_pdf`**
+   - `markdown` (string): Source Markdown text.
+   - `output_path` (string): Target PDF file path.
+   - `mode` (`"sidebar"` | `"latex"` | `"simple"` | `"auto"`, default: `"auto"`).
+   - `margin_mm` (int, default: 12).
+2. **`detect_latex_needed`**
+   - Inspects Markdown and recommends the optimal backend.
+3. **`check_conversion_dependencies`**
+   - Health check returning tool status and availability.
 
-1. **`convert_markdown_to_pdf`** — `{markdown, output_path, mode: "latex"|"simple"|"auto", margin_mm: 12}` → Converts Markdown and writes PDF to disk.
-2. **`detect_latex_needed`** — `{markdown}` → Detects if LaTeX mode is required.
-3. **`check_conversion_dependencies`** — Checks status of `pandoc`, `wkhtmltopdf`, `pdflatex`, and compiles a probe test.
-
-### Configure in Google Antigravity / Claude Desktop
-
-In `mcp_config.json`:
+### Configuration in Google Antigravity / Claude Desktop:
 ```json
 {
   "mcpServers": {
@@ -143,27 +99,49 @@ In `mcp_config.json`:
 
 ---
 
-## Callout Boxes (LaTeX mode)
+## 📦 System Requirements
 
-Wrap paragraphs in fenced divs for colored callout boxes:
+- **Python 3.8+**
+- **Pandoc** (required for all modes):
+  ```powershell
+  choco install pandoc
+  ```
+- **Chromium** (for Sidebar mode — either Google Chrome or Microsoft Edge):
+  - Pre-installed on Windows (`msedge.exe` or `chrome.exe`).
+- **Optional Tools**:
+  - `pdflatex` (TeX Live or MiKTeX) for LaTeX Formal mode.
+  - `wkhtmltopdf` for Simple mode.
 
-```markdown
-::: {.callout}
-**Note:** Formulas like $W = \sum_{k=1}^M S_k S_k^T - M \cdot I_n$ are typeset natively.
-:::
+---
 
-::: {.answer}
-**Final Result:** The empty clause ($\square$) confirms the theorem.
-:::
+## 🔄 Automated Git Synchronization (`sync.ps1`)
+
+The repository includes a dedicated sync engine enforcing pre-commit secret scans and conventional commit standards:
+
+```powershell
+# Routine sync: pull, secret scan, commit, and push
+.\sync.ps1
+
+# Sync with custom commit message
+.\sync.ps1 -m "feat(sidebar): add light paper print theme"
+
+# Check conversion toolchains & probe template
+.\sync.ps1 -CheckTools
+
+# Safe pull only
+.\sync.ps1 -PullOnly
+
+# Dry run preview
+.\sync.ps1 -WhatIf
 ```
 
 ---
 
-## Repository Structure
+## 📂 Repository Structure
 
-- [`md2pdf/core.py`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/md2pdf/core.py) — Core conversion pipelines, ASCII table parser, and Markdown cleaner.
-- [`md2pdf/templates/styled.latex`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/md2pdf/templates/styled.latex) — Production Pandoc LaTeX template with `fvextra` wrapping, narrow margins, and color schemes.
-- [`md2pdf/templates/callout-boxes.lua`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/md2pdf/templates/callout-boxes.lua) — Lua filter converting `.callout` and `.answer` divs into LaTeX `tcolorbox`.
-- [`md2pdf_app.py`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/md2pdf_app.py) — Tkinter GUI desktop interface.
+- [`md2pdf/core.py`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/md2pdf/core.py) — Core conversion pipelines (`convert_sidebar`, `convert_latex`, `convert_simple`, `convert_auto`), AST sanitizers, and CSS templates.
+- [`md2pdf_app.py`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/md2pdf_app.py) — Modern Tkinter desktop application (`md2pdf Studio`).
 - [`mcp_server/server.py`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/mcp_server/server.py) — FastMCP server for AI agent workflows.
-- [`sync.ps1`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/sync.ps1) — Automated sync, secret scanner, and health verification engine.
+- [`md2pdf/templates/styled.latex`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/md2pdf/templates/styled.latex) — Pandoc LaTeX template for formal print outputs.
+- [`md2pdf/templates/callout-boxes.lua`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/md2pdf/templates/callout-boxes.lua) — Lua filter for LaTeX tcolorbox mapping.
+- [`sync.ps1`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/sync.ps1) — Automated sync engine and secret guard.
