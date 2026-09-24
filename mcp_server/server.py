@@ -42,16 +42,19 @@ from pydantic import BaseModel, Field
 from md2pdf import (
     check_tools,
     convert_latex,
+    convert_sidebar,
     convert_simple,
     detect_latex_needed,
+    detect_sidebar_needed,
     probe_latex_template,
 )
 
 
 class ConversionMode(str, Enum):
     """Which backend to use for the conversion."""
-    SIMPLE = "simple"
+    SIDEBAR = "sidebar"
     LATEX = "latex"
+    SIMPLE = "simple"
     AUTO = "auto"
 
 
@@ -61,10 +64,11 @@ class ConvertInput(BaseModel):
     markdown: str = Field(
         ...,
         description=(
-            "The Markdown source to convert. Supports standard Markdown plus, "
-            "in LaTeX mode, math ($...$, $$...$$) and fenced callout divs "
-            "(::: {.callout} ... ::: for an amber PTR-style box, "
-            "::: {.answer} ... ::: for a green summary box)."
+            "The Markdown source to convert. Supports standard Markdown plus: "
+            "- In Sidebar mode: Mermaid diagrams (```mermaid), KaTeX vector math ($...$, $$...$$), "
+            "GFM alert boxes (> [!TIP], > [!NOTE], etc.), and IDE dark theme styling. "
+            "- In LaTeX mode: math and fenced callout divs (::: {.callout} / ::: {.answer}). "
+            "- In Simple mode: fast standard HTML/CSS formatting."
         ),
         min_length=1,
     )
@@ -79,11 +83,10 @@ class ConvertInput(BaseModel):
     mode: ConversionMode = Field(
         default=ConversionMode.AUTO,
         description=(
+            "'sidebar' = Chromium + KaTeX + Mermaid.js (dark IDE preview fidelity, SVG diagrams, crisp vector math). "
+            "'latex' = pandoc+pdflatex (native math, colored section headings, tcolorbox boxes). "
             "'simple' = pandoc+wkhtmltopdf (fast, plain styling). "
-            "'latex' = pandoc+pdflatex (native math, colored section headings, "
-            "tcolorbox callout/answer boxes). "
-            "'auto' = detect from content (math or callout divs -> latex, "
-            "else simple) and fall back to simple if latex isn't available."
+            "'auto' = detect from content (Mermaid/GFM alerts/math -> sidebar if Chromium available, else latex, else simple)."
         ),
     )
     margin_mm: int = Field(
@@ -132,12 +135,32 @@ def convert_markdown_to_pdf(params: ConvertInput) -> str:
     mode = params.mode
 
     if mode == ConversionMode.AUTO:
-        needed, reason = detect_latex_needed(params.markdown)
-        latex_available = tools["pandoc"] and tools["pdflatex"]
-        mode = ConversionMode.LATEX if (needed and latex_available) else ConversionMode.SIMPLE
-        auto_note = f" (auto-detected: {reason or 'no math/callouts found'})"
+        needed_sidebar, reason_sidebar = detect_sidebar_needed(params.markdown)
+        if needed_sidebar and tools.get("chromium") and tools.get("pandoc"):
+            mode = ConversionMode.SIDEBAR
+            auto_note = f" (auto-detected: {reason_sidebar})"
+        else:
+            needed, reason = detect_latex_needed(params.markdown)
+            latex_available = tools["pandoc"] and tools["pdflatex"]
+            mode = ConversionMode.LATEX if (needed and latex_available) else ConversionMode.SIMPLE
+            auto_note = f" (auto-detected: {reason or 'no math/callouts found'})"
     else:
         auto_note = ""
+
+    if mode == ConversionMode.SIDEBAR:
+        if not (tools.get("pandoc") and tools.get("chromium")):
+            missing = []
+            if not tools.get("pandoc"): missing.append("pandoc")
+            if not tools.get("chromium"): missing.append("Google Chrome / Microsoft Edge")
+            return (
+                f"Error: sidebar mode needs {', '.join(missing)}. "
+                f"Ensure Google Chrome or Edge and pandoc are installed on the system."
+            )
+        try:
+            convert_sidebar(params.markdown, output_path, f"{params.margin_mm}mm")
+        except RuntimeError as e:
+            return f"Error: conversion failed.\n{e}"
+        return f"Saved PDF to {output_path} (mode: sidebar{auto_note})."
 
     if mode == ConversionMode.SIMPLE:
         if not (tools["pandoc"] and tools["wkhtmltopdf"]):
@@ -148,7 +171,7 @@ def convert_markdown_to_pdf(params: ConvertInput) -> str:
                 f"'sudo apt install {' '.join(missing)}')."
             )
         try:
-            convert_simple(params.markdown, output_path, params.margin_mm)
+            convert_simple(params.markdown, output_path, f"{params.margin_mm}mm")
         except RuntimeError as e:
             return f"Error: conversion failed.\n{e}"
         return f"Saved PDF to {output_path} (mode: simple{auto_note})."
@@ -168,7 +191,7 @@ def convert_markdown_to_pdf(params: ConvertInput) -> str:
             f"compile — a required LaTeX package is likely missing. Detail:\n{detail}"
         )
     try:
-        convert_latex(params.markdown, output_path, params.margin_mm)
+        convert_latex(params.markdown, output_path, f"{params.margin_mm}mm")
     except RuntimeError as e:
         return f"Error: conversion failed.\n{e}"
     return f"Saved PDF to {output_path} (mode: latex{auto_note})."
@@ -208,6 +231,9 @@ def detect_latex_needed_tool(params: DetectInput) -> str:
         str: "needed: <reason>" if LaTeX rendering is recommended, or
         "not needed" if the content is plain prose/lists/tables.
     """
+    needed_sidebar, reason_sidebar = detect_sidebar_needed(params.markdown)
+    if needed_sidebar:
+        return f"needed: {reason_sidebar} (Sidebar/Chromium or LaTeX recommended)"
     needed, reason = detect_latex_needed(params.markdown)
     return f"needed: {reason}" if needed else "not needed"
 
@@ -225,17 +251,22 @@ def detect_latex_needed_tool(params: DetectInput) -> str:
 def check_conversion_dependencies() -> str:
     """Report which conversion backends are actually usable on this machine.
 
-    Checks that pandoc/wkhtmltopdf/pdflatex are on PATH, and additionally
-    does a real dry-run compile of the LaTeX template to confirm every
-    required package (tcolorbox, mathpazo, etc.) resolves — a bare PATH
-    check can't catch a missing LaTeX package.
+    Checks that pandoc/wkhtmltopdf/pdflatex/chromium are available.
 
     Returns:
-        str: A short report of which modes ('simple', 'latex') are ready to
-        use, and which tools or packages are missing if either is not.
+        str: A short report of which modes ('sidebar', 'simple', 'latex') are ready to use.
     """
     tools = check_tools()
     lines = []
+
+    sidebar_ok = tools.get("pandoc") and tools.get("chromium")
+    if sidebar_ok:
+        lines.append("sidebar: ready (pandoc + Chrome/Edge found — full Mermaid & KaTeX support)")
+    else:
+        missing = []
+        if not tools.get("pandoc"): missing.append("pandoc")
+        if not tools.get("chromium"): missing.append("Google Chrome / Microsoft Edge")
+        lines.append(f"sidebar: NOT ready — missing: {', '.join(missing)}")
 
     simple_ok = tools["pandoc"] and tools["wkhtmltopdf"]
     if simple_ok:
@@ -255,6 +286,7 @@ def check_conversion_dependencies() -> str:
         lines.append(f"latex: NOT ready — missing: {', '.join(missing)}")
 
     return "\n".join(lines)
+
 
 
 if __name__ == "__main__":

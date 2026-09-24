@@ -28,6 +28,10 @@ _PAREN_MATH = re.compile(r"\\\(.+?\\\)", re.S)
 _BRACKET_MATH = re.compile(r"\\\[.+?\\\]", re.S)
 _CURRENCY_ONLY = re.compile(r"[\d,.\s]+")
 _CALLOUT_PATTERN = re.compile(r":::\s*\{\.(callout|answer)\}")
+_MERMAID_PATTERN = re.compile(r"```mermaid\s*\n", re.IGNORECASE)
+_GFM_ALERT_PATTERN = re.compile(
+    r"^>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]", re.MULTILINE | re.IGNORECASE
+)
 
 
 def _has_inline_math(md_content: str) -> bool:
@@ -51,12 +55,48 @@ def detect_latex_needed(md_content: str):
     return False, None
 
 
+def detect_sidebar_needed(md_content: str):
+    """Return (needed: bool, reason: str | None) — whether this Markdown uses
+    Mermaid diagrams, GFM alert boxes, or math that benefits from Chromium/KaTeX rendering."""
+    if _MERMAID_PATTERN.search(md_content):
+        return True, "Mermaid flowchart/diagram"
+    if _GFM_ALERT_PATTERN.search(md_content):
+        return True, "GFM alert box (> [!TIP])"
+    needed_latex, reason_latex = detect_latex_needed(md_content)
+    if needed_latex:
+        return True, reason_latex
+    return False, None
+
+
 # ---------------------------------------------------------------------------
 # Dependency checks
 # ---------------------------------------------------------------------------
+def find_chromium() -> str | None:
+    """Locate installed Google Chrome or Microsoft Edge executable."""
+    candidates = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    for name in ("chrome", "google-chrome", "msedge", "chromium"):
+        p = shutil.which(name)
+        if p:
+            return p
+    return None
+
+
 def check_tools():
-    """Return {"pandoc": bool, "wkhtmltopdf": bool, "pdflatex": bool}."""
-    return {t: shutil.which(t) is not None for t in ("pandoc", "wkhtmltopdf", "pdflatex")}
+    """Return tool availability dict."""
+    return {
+        "pandoc": shutil.which("pandoc") is not None,
+        "wkhtmltopdf": shutil.which("wkhtmltopdf") is not None,
+        "pdflatex": shutil.which("pdflatex") is not None,
+        "chromium": find_chromium() is not None,
+    }
 
 
 def probe_latex_template():
@@ -349,18 +389,370 @@ def convert_latex(md_content: str, save_path: str, margin: str = "0.5in") -> Non
             raise RuntimeError(f"pandoc/pdflatex failed:\n{result.stderr}")
 
 
+# ---------------------------------------------------------------------------
+# Sidebar Mode Templates & Helpers (Chromium + KaTeX + Mermaid.js)
+# ---------------------------------------------------------------------------
+def transform_gfm_alerts(md_text: str) -> str:
+    """Transforms GFM alert blocks (> [!TIP] ...) into structured HTML callouts."""
+    alert_types = {
+        "NOTE": {"color": "#3b82f6", "icon": "ℹ️"},
+        "TIP": {"color": "#22c55e", "icon": "💡"},
+        "IMPORTANT": {"color": "#a855f7", "icon": "📌"},
+        "WARNING": {"color": "#eab308", "icon": "⚠️"},
+        "CAUTION": {"color": "#ef4444", "icon": "🛑"},
+    }
+
+    pattern = re.compile(
+        r'^>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*\n((?:^>.*$\n?)+)',
+        re.MULTILINE | re.IGNORECASE
+    )
+
+    def _replace_alert(m):
+        atype = m.group(1).upper()
+        raw_body = m.group(2)
+        body_lines = []
+        for line in raw_body.splitlines():
+            if line.startswith('> '):
+                body_lines.append(line[2:])
+            elif line.startswith('>'):
+                body_lines.append(line[1:])
+            else:
+                body_lines.append(line)
+        body_content = "\n".join(body_lines)
+        cfg = alert_types.get(atype, alert_types["NOTE"])
+        
+        return (
+            f'\n\n<div class="markdown-alert markdown-alert-{atype.lower()}">\n'
+            f'<div class="markdown-alert-title">{cfg["icon"]} <strong>{atype}</strong></div>\n'
+            f'<div class="markdown-alert-content">\n\n{body_content}\n\n</div>\n'
+            f'</div>\n\n'
+        )
+
+    return pattern.sub(_replace_alert, md_text)
+
+
+def prepare_mermaid_for_html(md_text: str) -> str:
+    """Converts ```mermaid fences into <pre class="mermaid"> for Mermaid.js rendering."""
+    def _replace_mermaid(m):
+        code = m.group(1).strip()
+        return f'\n\n<pre class="mermaid">\n{code}\n</pre>\n\n'
+
+    return re.sub(r'```mermaid\s*\n(.*?)\n```', _replace_mermaid, md_text, flags=re.DOTALL)
+
+
+def clean_markdown_for_sidebar(md_content: str) -> str:
+    """Sanitizes and prepares markdown for modern Chromium/KaTeX/Mermaid rendering."""
+    if not md_content:
+        return ""
+    text = md_content.replace('\ufffd', '-')
+    text = transform_gfm_alerts(text)
+    text = prepare_mermaid_for_html(text)
+
+    # Normalize escaped brackets from LLMs
+    text = re.sub(r'\\\\\(', '$', text)
+    text = re.sub(r'\\\\\)', '$', text)
+    text = re.sub(r'\\\\\[', '$$', text)
+    text = re.sub(r'\\\\\]', '$$', text)
+    return text
+
+
+SIDEBAR_DARK_CSS = """
+<style>
+@page {
+    size: a4 portrait;
+    margin: 14mm 14mm 14mm 14mm;
+}
+:root {
+    --bg-primary: #18181b;
+    --bg-secondary: #27272a;
+    --text-primary: #f4f4f5;
+    --text-secondary: #a1a1aa;
+    --border-color: #3f3f46;
+    --accent: #38bdf8;
+}
+body {
+    background-color: var(--bg-primary) !important;
+    color: var(--text-primary) !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 10pt;
+    line-height: 1.6;
+    padding: 0;
+    margin: 0;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+}
+h1, h2, h3, h4, h5, h6 {
+    color: #ffffff !important;
+    font-weight: 700;
+    margin-top: 1.4em;
+    margin-bottom: 0.5em;
+    page-break-after: avoid;
+    break-after: avoid;
+}
+h1 { font-size: 18pt; border-bottom: 2px solid var(--border-color); padding-bottom: 6px; }
+h2 { font-size: 14pt; border-bottom: 1px solid var(--border-color); padding-bottom: 4px; }
+h3 { font-size: 12pt; color: #38bdf8 !important; }
+h4 { font-size: 11pt; }
+p, li {
+    color: #e4e4e7 !important;
+}
+a {
+    color: #38bdf8 !important;
+    text-decoration: underline;
+}
+code {
+    background: #27272a !important;
+    color: #f43f5e !important;
+    padding: 2px 5px;
+    border-radius: 4px;
+    font-family: Consolas, "JetBrains Mono", monospace;
+    font-size: 9pt;
+}
+pre {
+    background: #27272a !important;
+    border: 1px solid var(--border-color);
+    padding: 10px 14px;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-family: Consolas, "JetBrains Mono", monospace;
+    font-size: 8.5pt;
+    color: #f4f4f5 !important;
+    page-break-inside: auto;
+    break-inside: auto;
+}
+pre code {
+    background: transparent !important;
+    color: inherit !important;
+    padding: 0;
+}
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 12px 0;
+    font-size: 8.5pt;
+    page-break-inside: auto;
+    break-inside: auto;
+}
+th, td {
+    border: 1px solid var(--border-color);
+    padding: 6px 10px;
+    text-align: left;
+}
+th {
+    background-color: #27272a !important;
+    color: #ffffff !important;
+    font-weight: 600;
+}
+tr:nth-child(even) {
+    background-color: rgba(255, 255, 255, 0.02) !important;
+}
+hr {
+    border: none;
+    border-top: 1px solid var(--border-color);
+    margin: 18px 0;
+}
+blockquote {
+    border-left: 4px solid var(--border-color);
+    margin: 10px 0;
+    padding: 6px 14px;
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.02);
+}
+/* GFM Alerts */
+.markdown-alert {
+    border-left: 4px solid #3b82f6;
+    border-radius: 4px;
+    padding: 10px 14px;
+    margin: 14px 0;
+    background: rgba(255, 255, 255, 0.03);
+    page-break-inside: auto;
+    break-inside: auto;
+}
+.markdown-alert-title {
+    font-weight: 700;
+    margin-bottom: 6px;
+    font-size: 9.5pt;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.markdown-alert-content {
+    font-size: 9.5pt;
+    color: #e4e4e7;
+}
+.markdown-alert-note { border-color: #3b82f6; background: rgba(59, 130, 246, 0.1); }
+.markdown-alert-note .markdown-alert-title { color: #60a5fa; }
+.markdown-alert-tip { border-color: #22c55e; background: rgba(34, 197, 94, 0.1); }
+.markdown-alert-tip .markdown-alert-title { color: #4ade80; }
+.markdown-alert-important { border-color: #a855f7; background: rgba(168, 85, 247, 0.1); }
+.markdown-alert-important .markdown-alert-title { color: #c084fc; }
+.markdown-alert-warning { border-color: #eab308; background: rgba(234, 179, 8, 0.1); }
+.markdown-alert-warning .markdown-alert-title { color: #facc15; }
+.markdown-alert-caution { border-color: #ef4444; background: rgba(239, 68, 68, 0.1); }
+.markdown-alert-caution .markdown-alert-title { color: #f87171; }
+
+/* KaTeX Math */
+.katex-display {
+    margin: 10px 0;
+    overflow-x: auto;
+    page-break-inside: auto;
+    break-inside: auto;
+}
+.katex {
+    color: #f4f4f5 !important;
+}
+
+/* Mermaid Graphs */
+.mermaid {
+    display: flex;
+    justify-content: center;
+    background: #18181b !important;
+    margin: 12px auto;
+    padding: 8px;
+    max-width: 100%;
+    page-break-inside: auto;
+    break-inside: auto;
+}
+.mermaid svg {
+    max-width: 100% !important;
+    max-height: 650px !important;
+    height: auto !important;
+}
+</style>
+"""
+
+HTML_SIDEBAR_WRAPPER = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Document</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  {css}
+</head>
+<body>
+  {body}
+  <script>
+    mermaid.initialize({{
+      startOnLoad: false,
+      theme: 'dark',
+      themeVariables: {{
+        darkMode: true,
+        background: '#18181b',
+        mainBkg: '#27272a',
+        textColor: '#f4f4f5',
+        lineColor: '#718096',
+        primaryColor: '#27272a',
+        primaryTextColor: '#f4f4f5',
+        primaryBorderColor: '#52525b',
+        secondaryColor: '#3f3f46',
+        tertiaryColor: '#18181b'
+      }}
+    }});
+    
+    document.addEventListener("DOMContentLoaded", async function() {{
+      renderMathInElement(document.body, {{
+        delimiters: [
+          {{left: "$$", right: "$$", display: true}},
+          {{left: "$", right: "$", display: false}},
+          {{left: "\\\\(", right: "\\\\)", display: false}},
+          {{left: "\\\\[", right: "\\\\]", display: true}}
+        ],
+        throwOnError: false
+      }});
+      
+      try {{
+        await mermaid.run({{ querySelector: '.mermaid' }});
+      }} catch (err) {{
+        console.error("Mermaid render error:", err);
+      }}
+      window.__RENDER_COMPLETE = true;
+    }});
+  </script>
+</body>
+</html>
+"""
+
+
+def convert_sidebar(md_content: str, save_path: str, margin: str = "14mm", theme: str = "dark") -> None:
+    """Converts Markdown to PDF using Headless Chromium + KaTeX + Mermaid.js.
+    Provides identical visual fidelity to the modern IDE Markdown preview sidebar.
+    """
+    chrome = find_chromium()
+    if not chrome:
+        raise RuntimeError("Google Chrome or Microsoft Edge executable not found on system.")
+
+    cleaned = clean_markdown_for_sidebar(md_content)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        md_file = os.path.join(tmp, "doc.md")
+        body_html_file = os.path.join(tmp, "body.html")
+        final_html_file = os.path.join(tmp, "final.html")
+
+        with open(md_file, "w", encoding="utf-8") as f:
+            f.write(cleaned)
+
+        # Render markdown to HTML fragment via pandoc
+        res = subprocess.run([
+            "pandoc", md_file,
+            "-f", "markdown+raw_html+pipe_tables",
+            "-t", "html5",
+            "-o", body_html_file,
+        ], capture_output=True, text=True)
+
+        if res.returncode != 0:
+            raise RuntimeError(f"pandoc failed:\n{res.stderr}")
+
+        with open(body_html_file, "r", encoding="utf-8") as f:
+            body_content = f.read()
+
+        full_html = HTML_SIDEBAR_WRAPPER.format(css=SIDEBAR_DARK_CSS, body=body_content)
+
+        with open(final_html_file, "w", encoding="utf-8") as f:
+            f.write(full_html)
+
+        cmd = [
+            chrome,
+            "--headless=new",
+            "--disable-gpu",
+            "--allow-running-insecure-content",
+            "--virtual-time-budget=10000",
+            "--run-all-compositor-stages-before-draw",
+            "--no-pdf-header-footer",
+            f"--print-to-pdf={save_path}",
+            final_html_file,
+        ]
+
+        p_res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if not os.path.isfile(save_path) or os.path.getsize(save_path) == 0:
+            raise RuntimeError(f"Chromium PDF generation failed:\n{p_res.stderr}")
+
+
 def convert_auto(md_content: str, save_path: str, margin: str = "0.5in"):
-    """Pick LaTeX mode if the content needs it and it's available, else
-    Simple mode. Falls back to Simple mode on pdflatex failure."""
-    needed, _reason = detect_latex_needed(md_content)
+    """Pick Sidebar/Chromium mode if the content needs it (Mermaid/GFM alerts/math)
+    and Chromium is available. Otherwise falls back to LaTeX mode, then Simple mode."""
     tools = check_tools()
+    needed_sidebar, _reason_sidebar = detect_sidebar_needed(md_content)
+
+    if needed_sidebar and tools.get("chromium") and tools.get("pandoc"):
+        try:
+            convert_sidebar(md_content, save_path, margin=margin)
+            return "sidebar"
+        except Exception:
+            pass
+
+    needed_latex, _reason_latex = detect_latex_needed(md_content)
     latex_available = tools.get("pandoc") and tools.get("pdflatex")
-    if needed and latex_available:
+    if needed_latex and latex_available:
         try:
             convert_latex(md_content, save_path, margin)
             return "latex"
         except Exception:
             pass
+
     convert_simple(md_content, save_path, margin)
     return "simple"
+
 

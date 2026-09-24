@@ -17,11 +17,16 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 from md2pdf import (
     check_tools,
+    convert_auto,
     convert_latex,
+    convert_sidebar,
     convert_simple,
     detect_latex_needed,
+    detect_sidebar_needed,
+    find_chromium,
     probe_latex_template,
 )
+
 
 
 class MD2PDFApp:
@@ -36,6 +41,8 @@ class MD2PDFApp:
 
     def _check_deps(self):
         self.have = check_tools()
+        # Sidebar mode needs pandoc+chromium.
+        self.sidebar_ok = self.have["pandoc"] and self.have.get("chromium", False)
         # Simple mode needs pandoc+wkhtmltopdf.
         self.simple_ok = self.have["pandoc"] and self.have["wkhtmltopdf"]
         # LaTeX mode needs pandoc+pdflatex AND the template's packages actually
@@ -85,42 +92,37 @@ class MD2PDFApp:
         self.file_label = ttk.Label(top, text="No file loaded — paste or type Markdown below")
         self.file_label.pack(side="left", padx=10)
 
-        if self.missing_deps:
+        if not self.sidebar_ok and not self.simple_ok and not self.latex_ok:
             warn = ttk.Label(
                 self.root,
                 text=f"⚠ Missing tools: {', '.join(self.missing_deps)}. "
-                     f"Simple mode needs pandoc+wkhtmltopdf; LaTeX mode needs pandoc+pdflatex.",
+                     f"Install Chrome/Edge for Sidebar mode, pandoc+wkhtmltopdf for Simple, or pdflatex for LaTeX.",
                 foreground="#b00020",
                 wraplength=720,
             )
             warn.pack(fill="x", padx=10, pady=(0, 6))
-        elif self.have["pandoc"] and self.have["pdflatex"] and not self.latex_ok:
-            warn = ttk.Label(
-                self.root,
-                text="⚠ pdflatex is installed but a required LaTeX package is missing "
-                     "(e.g. tcolorbox) — LaTeX mode will fail. See detail on hover.",
-                foreground="#b00020",
-                wraplength=720,
-            )
-            warn.pack(fill="x", padx=10, pady=(0, 6))
-            self._add_tooltip(warn, self.latex_detail or "Unknown LaTeX error")
 
         # Conversion mode selector
         mode_frame = ttk.LabelFrame(self.root, text="Conversion mode")
         mode_frame.pack(fill="x", padx=10, pady=(0, 6))
-        self.mode_var = tk.StringVar(value="latex" if self.latex_ok else "simple")
+        default_mode = "sidebar" if self.sidebar_ok else ("latex" if self.latex_ok else "simple")
+        self.mode_var = tk.StringVar(value=default_mode)
         ttk.Radiobutton(
-            mode_frame, text="Simple (HTML/CSS via wkhtmltopdf)",
-            variable=self.mode_var, value="simple",
+            mode_frame, text="Sidebar (Dark IDE + KaTeX + Mermaid)",
+            variable=self.mode_var, value="sidebar",
         ).pack(side="left", padx=(8, 4), pady=4)
         ttk.Radiobutton(
-            mode_frame, text="LaTeX (styled boxes + native math via pdflatex)",
+            mode_frame, text="LaTeX (Formal print via pdflatex)",
             variable=self.mode_var, value="latex",
+        ).pack(side="left", padx=4, pady=4)
+        ttk.Radiobutton(
+            mode_frame, text="Simple (wkhtmltopdf)",
+            variable=self.mode_var, value="simple",
         ).pack(side="left", padx=4, pady=4)
 
         self.auto_detect_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            mode_frame, text="Auto-detect from content",
+            mode_frame, text="Auto-detect",
             variable=self.auto_detect_var,
         ).pack(side="left", padx=(16, 4), pady=4)
 
@@ -164,14 +166,20 @@ class MD2PDFApp:
             self.detect_label.config(text="")
             return
         content = self.text.get("1.0", "end")
+        needed_sidebar, reason_sidebar = detect_sidebar_needed(content)
+        if needed_sidebar and self.sidebar_ok:
+            self.detect_label.config(text=f"Detected {reason_sidebar} → Sidebar mode", foreground="#38bdf8")
+            self.mode_var.set("sidebar")
+            return
+
         needed, reason = detect_latex_needed(content)
         if needed:
-            self.detect_label.config(text=f"Detected {reason} → LaTeX mode")
             if self.latex_ok:
+                self.detect_label.config(text=f"Detected {reason} → LaTeX mode", foreground="#0a6")
                 self.mode_var.set("latex")
             else:
                 self.detect_label.config(
-                    text=f"Detected {reason}, but LaTeX mode unavailable — see warning above",
+                    text=f"Detected {reason}, but LaTeX mode unavailable",
                     foreground="#b00020",
                 )
         else:
@@ -194,6 +202,9 @@ class MD2PDFApp:
 
     def convert(self):
         mode = self.mode_var.get()
+        if mode == "sidebar" and not self.sidebar_ok:
+            messagebox.showerror("Missing dependencies", "Sidebar mode needs: pandoc, and Chrome or Edge")
+            return
         if mode == "simple" and not self.simple_ok:
             messagebox.showerror("Missing dependencies", "Simple mode needs: pandoc, wkhtmltopdf")
             return
@@ -225,7 +236,9 @@ class MD2PDFApp:
         self.root.update_idletasks()
 
         try:
-            if mode == "latex":
+            if mode == "sidebar":
+                convert_sidebar(md_content, save_path, margin)
+            elif mode == "latex":
                 convert_latex(md_content, save_path, margin)
             else:
                 convert_simple(md_content, save_path, margin)
