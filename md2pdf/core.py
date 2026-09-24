@@ -621,6 +621,172 @@ blockquote {
 </style>
 """
 
+SIDEBAR_LIGHT_CSS = """
+<style>
+@page {
+    size: a4 portrait;
+    margin: 14mm 14mm 14mm 14mm;
+}
+:root {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8fafc;
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --border-color: #e2e8f0;
+    --accent: #0284c7;
+}
+body {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 10pt;
+    line-height: 1.6;
+    padding: 0;
+    margin: 0;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+}
+h1, h2, h3, h4, h5, h6 {
+    color: #0f172a !important;
+    font-weight: 700;
+    margin-top: 1.4em;
+    margin-bottom: 0.5em;
+    page-break-after: avoid;
+    break-after: avoid;
+}
+h1 { font-size: 18pt; border-bottom: 2px solid #e2e8f0; padding-bottom: 6px; }
+h2 { font-size: 14pt; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
+h3 { font-size: 12pt; color: #0284c7 !important; }
+h4 { font-size: 11pt; }
+p, li {
+    color: #1e293b !important;
+}
+a {
+    color: #0284c7 !important;
+    text-decoration: underline;
+}
+code {
+    background: #f1f5f9 !important;
+    color: #e11d48 !important;
+    padding: 2px 5px;
+    border-radius: 4px;
+    font-family: Consolas, "JetBrains Mono", monospace;
+    font-size: 9pt;
+    border: 1px solid #e2e8f0;
+}
+pre {
+    background: #f8fafc !important;
+    border: 1px solid #e2e8f0;
+    padding: 10px 14px;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-family: Consolas, "JetBrains Mono", monospace;
+    font-size: 8.5pt;
+    color: #0f172a !important;
+    page-break-inside: auto;
+    break-inside: auto;
+}
+pre code {
+    background: transparent !important;
+    color: inherit !important;
+    border: none !important;
+    padding: 0;
+}
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 12px 0;
+    font-size: 8.5pt;
+    page-break-inside: auto;
+    break-inside: auto;
+}
+th, td {
+    border: 1px solid #cbd5e1;
+    padding: 6px 10px;
+    text-align: left;
+}
+th {
+    background-color: #f1f5f9 !important;
+    color: #0f172a !important;
+    font-weight: 600;
+}
+tr:nth-child(even) {
+    background-color: #f8fafc !important;
+}
+hr {
+    border: none;
+    border-top: 1px solid #e2e8f0;
+    margin: 18px 0;
+}
+blockquote {
+    border-left: 4px solid #cbd5e1;
+    margin: 10px 0;
+    padding: 6px 14px;
+    color: #475569;
+    background: #f8fafc;
+}
+/* GFM Alerts (Light Mode) */
+.markdown-alert {
+    border-left: 4px solid #3b82f6;
+    border-radius: 4px;
+    padding: 10px 14px;
+    margin: 14px 0;
+    page-break-inside: auto;
+    break-inside: auto;
+}
+.markdown-alert-title {
+    font-weight: 700;
+    margin-bottom: 6px;
+    font-size: 9.5pt;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.markdown-alert-content {
+    font-size: 9.5pt;
+    color: #1e293b;
+}
+.markdown-alert-note { border-color: #3b82f6; background: #eff6ff; }
+.markdown-alert-note .markdown-alert-title { color: #1d4ed8; }
+.markdown-alert-tip { border-color: #16a34a; background: #f0fdf4; }
+.markdown-alert-tip .markdown-alert-title { color: #15803d; }
+.markdown-alert-important { border-color: #9333ea; background: #faf5ff; }
+.markdown-alert-important .markdown-alert-title { color: #7e22ce; }
+.markdown-alert-warning { border-color: #ca8a04; background: #fefce8; }
+.markdown-alert-warning .markdown-alert-title { color: #a16207; }
+.markdown-alert-caution { border-color: #dc2626; background: #fef2f2; }
+.markdown-alert-caution .markdown-alert-title { color: #b91c1c; }
+
+/* KaTeX Math */
+.katex-display {
+    margin: 10px 0;
+    overflow-x: auto;
+    page-break-inside: auto;
+    break-inside: auto;
+}
+.katex {
+    color: #0f172a !important;
+}
+
+/* Mermaid Graphs */
+.mermaid {
+    display: flex;
+    justify-content: center;
+    background: #ffffff !important;
+    margin: 12px auto;
+    padding: 8px;
+    max-width: 100%;
+    page-break-inside: auto;
+    break-inside: auto;
+}
+.mermaid svg {
+    max-width: 100% !important;
+    max-height: 650px !important;
+    height: auto !important;
+}
+</style>
+"""
+
 HTML_SIDEBAR_WRAPPER = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -637,18 +803,18 @@ HTML_SIDEBAR_WRAPPER = """<!DOCTYPE html>
   <script>
     mermaid.initialize({{
       startOnLoad: false,
-      theme: 'dark',
+      theme: '{mermaid_theme}',
       themeVariables: {{
-        darkMode: true,
-        background: '#18181b',
-        mainBkg: '#27272a',
-        textColor: '#f4f4f5',
-        lineColor: '#718096',
-        primaryColor: '#27272a',
-        primaryTextColor: '#f4f4f5',
-        primaryBorderColor: '#52525b',
-        secondaryColor: '#3f3f46',
-        tertiaryColor: '#18181b'
+        darkMode: {is_dark},
+        background: '{bg_color}',
+        mainBkg: '{box_bkg}',
+        textColor: '{text_color}',
+        lineColor: '{line_color}',
+        primaryColor: '{box_bkg}',
+        primaryTextColor: '{text_color}',
+        primaryBorderColor: '{border_color}',
+        secondaryColor: '{border_color}',
+        tertiaryColor: '{bg_color}'
       }}
     }});
     
@@ -679,12 +845,22 @@ HTML_SIDEBAR_WRAPPER = """<!DOCTYPE html>
 def convert_sidebar(md_content: str, save_path: str, margin: str = "14mm", theme: str = "dark") -> None:
     """Converts Markdown to PDF using Headless Chromium + KaTeX + Mermaid.js.
     Provides identical visual fidelity to the modern IDE Markdown preview sidebar.
+    Supports theme='dark' (IDE sidebar) or theme='light' (clean print paper).
     """
     chrome = find_chromium()
     if not chrome:
         raise RuntimeError("Google Chrome or Microsoft Edge executable not found on system.")
 
     cleaned = clean_markdown_for_sidebar(md_content)
+
+    is_dark = theme.lower() != "light"
+    css_content = SIDEBAR_DARK_CSS if is_dark else SIDEBAR_LIGHT_CSS
+    mermaid_theme = "dark" if is_dark else "default"
+    bg_color = "#18181b" if is_dark else "#ffffff"
+    box_bkg = "#27272a" if is_dark else "#f1f5f9"
+    text_color = "#f4f4f5" if is_dark else "#0f172a"
+    line_color = "#718096" if is_dark else "#64748b"
+    border_color = "#52525b" if is_dark else "#cbd5e1"
 
     with tempfile.TemporaryDirectory() as tmp:
         md_file = os.path.join(tmp, "doc.md")
@@ -708,7 +884,17 @@ def convert_sidebar(md_content: str, save_path: str, margin: str = "14mm", theme
         with open(body_html_file, "r", encoding="utf-8") as f:
             body_content = f.read()
 
-        full_html = HTML_SIDEBAR_WRAPPER.format(css=SIDEBAR_DARK_CSS, body=body_content)
+        full_html = HTML_SIDEBAR_WRAPPER.format(
+            css=css_content,
+            body=body_content,
+            mermaid_theme=mermaid_theme,
+            is_dark="true" if is_dark else "false",
+            bg_color=bg_color,
+            box_bkg=box_bkg,
+            text_color=text_color,
+            line_color=line_color,
+            border_color=border_color,
+        )
 
         with open(final_html_file, "w", encoding="utf-8") as f:
             f.write(full_html)
@@ -728,6 +914,7 @@ def convert_sidebar(md_content: str, save_path: str, margin: str = "14mm", theme
         p_res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         if not os.path.isfile(save_path) or os.path.getsize(save_path) == 0:
             raise RuntimeError(f"Chromium PDF generation failed:\n{p_res.stderr}")
+
 
 
 def convert_auto(md_content: str, save_path: str, margin: str = "0.5in"):
