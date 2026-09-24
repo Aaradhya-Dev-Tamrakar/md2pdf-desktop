@@ -266,7 +266,7 @@ class MD2PDFStudioApp:
 
         ttk.Label(mode_inner, text="ENGINE SELECTION", style="CardTitle.TLabel").pack(anchor="w", pady=(0, 4))
 
-        default_mode = "sidebar_dark" if self.sidebar_ok else ("latex" if self.latex_ok else "simple")
+        default_mode = "sidebar_light" if self.sidebar_ok else ("latex" if self.latex_ok else "simple")
         self.mode_var = tk.StringVar(value=default_mode)
 
         row_modes = ttk.Frame(mode_inner, style="Card.TFrame")
@@ -274,19 +274,20 @@ class MD2PDFStudioApp:
 
         ttk.Radiobutton(
             row_modes,
-            text="🌟 Sidebar Dark (Chromium + KaTeX + SVG Mermaid)",
+            text="☀️ Sidebar Light (Print Paper + KaTeX + SVG Mermaid)",
             variable=self.mode_var,
-            value="sidebar_dark",
+            value="sidebar_light",
             style="Card.TRadiobutton",
         ).pack(side="left", padx=(0, 14))
 
         ttk.Radiobutton(
             row_modes,
-            text="☀️ Sidebar Light (Print Paper)",
+            text="🌙 Sidebar Dark (IDE Dark Theme)",
             variable=self.mode_var,
-            value="sidebar_light",
+            value="sidebar_dark",
             style="Card.TRadiobutton",
         ).pack(side="left", padx=14)
+
 
         ttk.Radiobutton(
             row_modes,

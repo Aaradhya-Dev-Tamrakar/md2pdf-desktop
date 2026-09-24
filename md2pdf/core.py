@@ -630,15 +630,15 @@ SIDEBAR_LIGHT_CSS = """
 :root {
     --bg-primary: #ffffff;
     --bg-secondary: #f8fafc;
-    --text-primary: #0f172a;
-    --text-secondary: #475569;
-    --border-color: #e2e8f0;
-    --accent: #0284c7;
+    --text-primary: #111827;
+    --text-secondary: #4b5563;
+    --border-color: #e5e7eb;
+    --accent: #2563eb;
 }
-body {
+html, body {
     background-color: #ffffff !important;
-    color: #0f172a !important;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: #111827 !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, "Helvetica Neue", Arial, sans-serif;
     font-size: 10pt;
     line-height: 1.6;
     padding: 0;
@@ -647,42 +647,42 @@ body {
     print-color-adjust: exact !important;
 }
 h1, h2, h3, h4, h5, h6 {
-    color: #0f172a !important;
+    color: #111827 !important;
     font-weight: 700;
     margin-top: 1.4em;
     margin-bottom: 0.5em;
     page-break-after: avoid;
     break-after: avoid;
 }
-h1 { font-size: 18pt; border-bottom: 2px solid #e2e8f0; padding-bottom: 6px; }
-h2 { font-size: 14pt; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
-h3 { font-size: 12pt; color: #0284c7 !important; }
-h4 { font-size: 11pt; }
+h1 { font-size: 18pt; border-bottom: 2px solid #e5e7eb; padding-bottom: 6px; }
+h2 { font-size: 14pt; border-bottom: 1.5px solid #e5e7eb; padding-bottom: 4px; color: #111827 !important; }
+h3 { font-size: 12pt; color: #1d4ed8 !important; }
+h4 { font-size: 11pt; color: #7c3aed !important; }
 p, li {
-    color: #1e293b !important;
+    color: #1f2937 !important;
 }
 a {
-    color: #0284c7 !important;
+    color: #2563eb !important;
     text-decoration: underline;
 }
 code {
-    background: #f1f5f9 !important;
+    background: #f3f4f6 !important;
     color: #e11d48 !important;
     padding: 2px 5px;
     border-radius: 4px;
     font-family: Consolas, "JetBrains Mono", monospace;
     font-size: 9pt;
-    border: 1px solid #e2e8f0;
+    border: 1px solid #e5e7eb;
 }
 pre {
-    background: #f8fafc !important;
-    border: 1px solid #e2e8f0;
+    background: #f9fafb !important;
+    border: 1px solid #e5e7eb;
     padding: 10px 14px;
     border-radius: 6px;
     overflow-x: auto;
     font-family: Consolas, "JetBrains Mono", monospace;
     font-size: 8.5pt;
-    color: #0f172a !important;
+    color: #111827 !important;
     page-break-inside: auto;
     break-inside: auto;
 }
@@ -701,34 +701,34 @@ table {
     break-inside: auto;
 }
 th, td {
-    border: 1px solid #cbd5e1;
+    border: 1px solid #d1d5db;
     padding: 6px 10px;
     text-align: left;
 }
 th {
-    background-color: #f1f5f9 !important;
-    color: #0f172a !important;
+    background-color: #f3f4f6 !important;
+    color: #111827 !important;
     font-weight: 600;
 }
 tr:nth-child(even) {
-    background-color: #f8fafc !important;
+    background-color: #f9fafb !important;
 }
 hr {
     border: none;
-    border-top: 1px solid #e2e8f0;
+    border-top: 1px solid #e5e7eb;
     margin: 18px 0;
 }
 blockquote {
     border-left: 4px solid #cbd5e1;
     margin: 10px 0;
     padding: 6px 14px;
-    color: #475569;
-    background: #f8fafc;
+    color: #4b5563;
+    background: #f9fafb;
 }
 /* GFM Alerts (Light Mode) */
 .markdown-alert {
     border-left: 4px solid #3b82f6;
-    border-radius: 4px;
+    border-radius: 6px;
     padding: 10px 14px;
     margin: 14px 0;
     page-break-inside: auto;
@@ -744,9 +744,9 @@ blockquote {
 }
 .markdown-alert-content {
     font-size: 9.5pt;
-    color: #1e293b;
+    color: #1f2937;
 }
-.markdown-alert-note { border-color: #3b82f6; background: #eff6ff; }
+.markdown-alert-note { border-color: #2563eb; background: #eff6ff; }
 .markdown-alert-note .markdown-alert-title { color: #1d4ed8; }
 .markdown-alert-tip { border-color: #16a34a; background: #f0fdf4; }
 .markdown-alert-tip .markdown-alert-title { color: #15803d; }
@@ -765,7 +765,7 @@ blockquote {
     break-inside: auto;
 }
 .katex {
-    color: #0f172a !important;
+    color: #111827 !important;
 }
 
 /* Mermaid Graphs */
@@ -842,10 +842,10 @@ HTML_SIDEBAR_WRAPPER = """<!DOCTYPE html>
 """
 
 
-def convert_sidebar(md_content: str, save_path: str, margin: str = "14mm", theme: str = "dark") -> None:
+def convert_sidebar(md_content: str, save_path: str, margin: str = "14mm", theme: str = "light") -> None:
     """Converts Markdown to PDF using Headless Chromium + KaTeX + Mermaid.js.
     Provides identical visual fidelity to the modern IDE Markdown preview sidebar.
-    Supports theme='dark' (IDE sidebar) or theme='light' (clean print paper).
+    Supports theme='light' (default clean paper print) or theme='dark' (IDE sidebar).
     """
     chrome = find_chromium()
     if not chrome:
@@ -853,14 +853,23 @@ def convert_sidebar(md_content: str, save_path: str, margin: str = "14mm", theme
 
     cleaned = clean_markdown_for_sidebar(md_content)
 
-    is_dark = theme.lower() != "light"
-    css_content = SIDEBAR_DARK_CSS if is_dark else SIDEBAR_LIGHT_CSS
-    mermaid_theme = "dark" if is_dark else "default"
-    bg_color = "#18181b" if is_dark else "#ffffff"
-    box_bkg = "#27272a" if is_dark else "#f1f5f9"
-    text_color = "#f4f4f5" if is_dark else "#0f172a"
-    line_color = "#718096" if is_dark else "#64748b"
-    border_color = "#52525b" if is_dark else "#cbd5e1"
+    is_dark = theme.lower() == "dark"
+    if is_dark:
+        css_content = SIDEBAR_DARK_CSS
+        mermaid_theme = "dark"
+        bg_color = "#18181b"
+        box_bkg = "#27272a"
+        text_color = "#f4f4f5"
+        line_color = "#718096"
+        border_color = "#52525b"
+    else:
+        css_content = SIDEBAR_LIGHT_CSS
+        mermaid_theme = "default"
+        bg_color = "#ffffff"
+        box_bkg = "#ffffff"
+        text_color = "#111827"
+        line_color = "#4b5563"
+        border_color = "#374151"
 
     with tempfile.TemporaryDirectory() as tmp:
         md_file = os.path.join(tmp, "doc.md")
@@ -916,8 +925,7 @@ def convert_sidebar(md_content: str, save_path: str, margin: str = "14mm", theme
             raise RuntimeError(f"Chromium PDF generation failed:\n{p_res.stderr}")
 
 
-
-def convert_auto(md_content: str, save_path: str, margin: str = "0.5in"):
+def convert_auto(md_content: str, save_path: str, margin: str = "0.5in", theme: str = "light"):
     """Pick Sidebar/Chromium mode if the content needs it (Mermaid/GFM alerts/math)
     and Chromium is available. Otherwise falls back to LaTeX mode, then Simple mode."""
     tools = check_tools()
@@ -925,7 +933,7 @@ def convert_auto(md_content: str, save_path: str, margin: str = "0.5in"):
 
     if needed_sidebar and tools.get("chromium") and tools.get("pandoc"):
         try:
-            convert_sidebar(md_content, save_path, margin=margin)
+            convert_sidebar(md_content, save_path, margin=margin, theme=theme)
             return "sidebar"
         except Exception:
             pass
@@ -941,5 +949,6 @@ def convert_auto(md_content: str, save_path: str, margin: str = "0.5in"):
 
     convert_simple(md_content, save_path, margin)
     return "simple"
+
 
 
