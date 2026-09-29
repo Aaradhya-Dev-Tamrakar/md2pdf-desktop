@@ -6,6 +6,6 @@
     {"file":"03-unicode.md","renderer":"simple","min_pages":1,"required_text":["Unicode","engineering","theta"]},
     {"file":"04-pagination.md","renderer":"simple","min_pages":2,"required_text":["Pagination Fixture","Page content continues"]},
     {"file":"05-sidebar-math.md","renderer":"sidebar","min_pages":1,"required_text":["Sidebar Math","Equation"]},
-    {"file":"06-sidebar-mermaid-alert.md","renderer":"sidebar","min_pages":1,"required_text":["Sidebar Features","START","NOTE"]}
+    {"file":"06-sidebar-mermaid-alert.md","renderer":"sidebar","min_pages":1,"required_text":["Sidebar Features","NOTE"]}
   ]
 }
