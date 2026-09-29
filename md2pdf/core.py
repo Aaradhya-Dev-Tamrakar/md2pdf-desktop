@@ -14,6 +14,8 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 
+from pypdf import PdfReader
+
 from .web_assets import ensure_web_assets
 
 
@@ -77,6 +79,38 @@ def validate_pdf_output(path: str) -> None:
         raise RuntimeError(f"PDF appears truncated (missing %%EOF): {path}")
     if not has_page_object:
         raise RuntimeError(f"PDF contains no detectable page objects: {path}")
+
+
+def inspect_pdf_output(path: str, *, extract_text: bool = False) -> dict:
+    """Parse a generated PDF and return semantic artifact facts.
+
+    The existing lightweight validator remains the fast structural guard.
+    This release-quality inspector adds real PDF parsing and optional text
+    extraction for integration and regression tests.
+    """
+    validate_pdf_output(path)
+    try:
+        reader = PdfReader(path, strict=False)
+        page_count = len(reader.pages)
+    except Exception as exc:
+        raise RuntimeError(f"PDF could not be parsed: {path}: {exc}") from exc
+    if page_count < 1:
+        raise RuntimeError(f"PDF contains no pages: {path}")
+    info = {
+        "path": os.path.abspath(path),
+        "pages": page_count,
+        "encrypted": bool(reader.is_encrypted),
+        "text_chars": None,
+    }
+    if extract_text:
+        chunks = []
+        for page in reader.pages:
+            try:
+                chunks.append(page.extract_text() or "")
+            except Exception:
+                continue
+        info["text_chars"] = sum(len(chunk) for chunk in chunks)
+    return info
 
 
 @contextmanager

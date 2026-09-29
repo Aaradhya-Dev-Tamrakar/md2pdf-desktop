@@ -5,7 +5,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from md2pdf import convert_auto, convert_latex, convert_sidebar, convert_simple
+from md2pdf import __version__, convert_auto, convert_latex, convert_sidebar, convert_simple
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -13,6 +13,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="md2pdf",
         description="Convert a Markdown document to PDF using the md2pdf renderers.",
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("input", type=Path, help="Source Markdown file")
     parser.add_argument("-o", "--output", type=Path, help="Output PDF path (default: input name with .pdf)")
     parser.add_argument(
