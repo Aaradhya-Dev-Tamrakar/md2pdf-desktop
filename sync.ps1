@@ -46,6 +46,9 @@
 .PARAMETER CheckTools
     Verifies PDF conversion toolchains (pandoc, wkhtmltopdf, pdflatex) and tests the LaTeX template.
 
+PARAMETER RepairRemote
+    Explicitly add or repair the expected origin remote URL. Without this switch, a missing or mismatched origin is treated as a safety error.
+
 .PARAMETER Test
     Runs automated probe and test verification before staging and committing.
 
@@ -57,6 +60,7 @@
     .\sync.ps1 -Status                       # Show repository telemetry
     .\sync.ps1 -CheckTools                   # Verify pandoc, pdflatex, wkhtmltopdf toolchain
     .\sync.ps1 -WhatIf                       # Dry-run preview
+    .\sync.ps1 -RepairRemote                 # Explicitly repair origin if needed
 #>
 
 [CmdletBinding()]
