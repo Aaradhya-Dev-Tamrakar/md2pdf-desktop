@@ -16,7 +16,7 @@
        and validates the LaTeX template compiler.
     6. Clean Push & Conflict Recovery: Automatically retries rejected pushes via rebase.
     7. Repository Telemetry (-Status): Displays branch health, commits ahead/behind, and status.
-    8. Dry Run Mode (-WhatIf): Previews staging, secret scan, and commit message safely.
+    8. Dry Run Mode (-WhatIf): Read-only preview; never changes the Git index.
 
 .PARAMETER Message
     Custom commit message (e.g. -m "feat(core): add unicode logic symbol mapping").
@@ -79,6 +79,8 @@ param (
 
     [switch]$CheckTools,
 
+    [switch]$RepairRemote,
+
     [switch]$Test
 )
 
@@ -117,20 +119,32 @@ function Write-Fail {
 function Ensure-RemoteConfigured {
     $existingRemotes = @(git remote)
     if ($existingRemotes -notcontains $TargetRemoteName) {
-        Write-Status "Adding remote '$TargetRemoteName' ($TargetRemoteUrl)..."
-        git remote add $TargetRemoteName $TargetRemoteUrl
+        if ($RepairRemote) {
+            Write-Status "Adding remote '$TargetRemoteName' ($TargetRemoteUrl)..."
+            git remote add $TargetRemoteName $TargetRemoteUrl
+            if ($LASTEXITCODE -ne 0) { throw "Failed to add remote '$TargetRemoteName'." }
+            return
+        }
+        throw "Remote '$TargetRemoteName' is missing. Re-run with -RepairRemote to add it explicitly."
     }
-    else {
-        $currentUrl = (git remote get-url $TargetRemoteName 2>$null)
-        if ($currentUrl) { $currentUrl = $currentUrl.Trim() }
-        $cleanCurrent = $currentUrl -replace '\.git$', ''
-        $cleanTarget  = $TargetRemoteUrl -replace '\.git$', ''
-        if ($cleanCurrent -ne $cleanTarget) {
-            Write-Notice "Updating remote '$TargetRemoteName' URL to $TargetRemoteUrl..."
+
+    $currentUrl = (git remote get-url $TargetRemoteName 2>$null)
+    if ($currentUrl) { $currentUrl = $currentUrl.Trim() }
+    $cleanCurrent = $currentUrl -replace '\.git$', ''
+    $cleanTarget  = $TargetRemoteUrl -replace '\.git$', ''
+
+    if ($cleanCurrent -ne $cleanTarget) {
+        if ($RepairRemote) {
+            Write-Notice "Repairing remote '$TargetRemoteName' URL to $TargetRemoteUrl..."
             git remote set-url $TargetRemoteName $TargetRemoteUrl
+            if ($LASTEXITCODE -ne 0) { throw "Failed to update remote '$TargetRemoteName'." }
+        }
+        else {
+            throw "Remote '$TargetRemoteName' points to '$currentUrl'. Use -RepairRemote to change it to '$TargetRemoteUrl'."
         }
     }
 }
+
 
 function Test-PDFTools {
     Write-Host "`n========================================================" -ForegroundColor DarkCyan
@@ -171,23 +185,28 @@ function Test-PDFTools {
     Write-Host "========================================================`n" -ForegroundColor DarkCyan
 }
 
-function Find-StagedSecrets {
-    $stagedDiff = git diff --cached -U0 2>$null
-    if (-not $stagedDiff) { return @() }
+function Find-DiffSecrets {
+    param([string]$DiffText)
 
-    $addedLines = @($stagedDiff | Where-Object { $_ -match '^\+[^+]' } | ForEach-Object { $_.Substring(1) })
+    if ([string]::IsNullOrWhiteSpace($DiffText)) { return @() }
+
+    $addedLines = @(
+        $DiffText -split [Environment]::NewLine |
+        Where-Object { $_ -match '^\+[^+]' } |
+        ForEach-Object { $_.Substring(1).TrimEnd([char]13) }
+    )
     if ($addedLines.Count -eq 0) { return @() }
 
     $secretPatterns = @(
-        'AKIA[0-9A-Z]{16}',                                              # AWS Access Key
-        'sk-[a-zA-Z0-9]{20,}',                                           # OpenAI API Key
-        'sk-ant-[a-zA-Z0-9\-]{20,}',                                     # Anthropic API Key
-        'ghp_[a-zA-Z0-9]{36}',                                           # GitHub Personal Token
-        'github_pat_[a-zA-Z0-9_]{20,}',                                  # GitHub Fine-grained PAT
-        'AIza[0-9A-Za-z\-_]{35}',                                        # Google / Gemini API Key
-        'xox[baprs]-[0-9a-zA-Z\-]{10,}',                                 # Slack Token
-        '-----BEGIN (RSA|EC|OPENSSH|PGP|DSA)? ?PRIVATE KEY-----',        # Private Keys
-        '(?i)(api[_-]?key|secret|password|token|passwd)\s*[:=]\s*[''"][^''"\s]{8,}[''"]' # Generic Secrets
+        'AKIA[0-9A-Z]{16}',
+        'sk-[a-zA-Z0-9]{20,}',
+        'sk-ant-[a-zA-Z0-9\-]{20,}',
+        'ghp_[a-zA-Z0-9]{36}',
+        'github_pat_[a-zA-Z0-9_]{20,}',
+        'AIza[0-9A-Za-z\-_]{35}',
+        'xox[baprs]-[0-9a-zA-Z\-]{10,}',
+        '-----BEGIN (RSA|EC|OPENSSH|PGP|DSA)? ?PRIVATE KEY-----',
+        '(?i)(api[_-]?key|secret|password|token|passwd)\s*[:=]\s*[''"][^''"\s]{8,}[''"]'
     )
 
     $hits = @()
@@ -204,9 +223,13 @@ function Find-StagedSecrets {
             }
         }
     }
-
     return @($hits)
 }
+
+function Find-StagedSecrets {
+    return @(Find-DiffSecrets -DiffText (git diff --cached -U0 2>$null))
+}
+
 
 function Get-AutoCommitMessage {
     param([string]$ActiveBranch = "main")
@@ -299,7 +322,7 @@ function Get-AutoCommitMessage {
         $summary = "$firstTwo +$extraCount more"
     }
 
-    $diffStat = git diff --cached --shortstat 2>$null
+    $diffStat = git diff HEAD --shortstat 2>$null
     $churn = ""
     if ($diffStat -match '(\d+)\s+insertion') { $ins = $Matches[1] } else { $ins = 0 }
     if ($diffStat -match '(\d+)\s+deletion') { $del = $Matches[1] } else { $del = 0 }
@@ -422,10 +445,18 @@ try {
     Write-Status "Remote URL : $TargetRemoteUrl"
 
     if ($Test) {
+        Write-Status "Running regression tests..."
+        python -m unittest discover -s tests -v
+        if ($LASTEXITCODE -ne 0) {
+            Write-Fail "Regression tests failed. Aborting sync."
+            exit 1
+        }
+        Write-Success "Regression test suite passed."
+
         Write-Status "Running LaTeX template probe test..."
         python -c "from md2pdf.core import probe_latex_template; ok, err = probe_latex_template(); assert ok, err"
         if ($LASTEXITCODE -ne 0) {
-            Write-Fail "Probe test failed. Aborting sync."
+            Write-Fail "LaTeX template probe failed. Aborting sync."
             exit 1
         }
         Write-Success "LaTeX engine and template probe passed."
@@ -480,28 +511,54 @@ try {
 
     # 3. Dry run / WhatIf inspection
     if ($WhatIf) {
-        Write-Notice "[WhatIf] Local changes detected on [$currentBranch]. Previewing synchronization:"
+        Write-Notice "[WhatIf] Local changes detected on [$currentBranch]. Previewing without changing the Git index:"
         git status --short
-        git add -A
-        $secretHits = Find-StagedSecrets
+
+        $candidateDiff = git diff HEAD -U0 2>$null
+        $secretHits = Find-DiffSecrets -DiffText $candidateDiff
         if (@($secretHits).Count -gt 0) {
-            Write-Fail "[WhatIf] Security Alert: Found possible secret(s) in staged changes:"
+            Write-Fail "[WhatIf] Security Alert: Found possible secret(s) in pending changes:"
             foreach ($hit in @($secretHits)) {
                 Write-Host "    Pattern: $($hit.Pattern)" -ForegroundColor Yellow
                 Write-Host "    Snippet: $($hit.Snippet)" -ForegroundColor Gray
             }
         }
+
         $candidateMsg = if ($Message) { $Message } else { Get-AutoCommitMessage -ActiveBranch $currentBranch }
-        Write-Notice "[WhatIf] Auto commit message : '$candidateMsg'"
+        Write-Notice "[WhatIf] Candidate commit message: '$candidateMsg'"
         Write-Notice "[WhatIf] Push destination    : origin/$currentBranch"
-        git reset --quiet
-        Write-Success "[WhatIf] Dry run completed. No changes committed or pushed."
+        Write-Success "[WhatIf] Dry run completed. Git index and working tree were not modified."
         exit 0
     }
 
+
     # 4. Stage changes & run security scan
-    Write-Status "Staging changes..."
-    git add -A
+    $stagedFiles = @(git diff --cached --name-only 2>$null | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $unstagedFiles = @(git diff --name-only 2>$null | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $untrackedFiles = @(git ls-files --others --exclude-standard 2>$null | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+
+    $hasStagedOnly = $stagedFiles.Count -gt 0 -and $unstagedFiles.Count -eq 0 -and $untrackedFiles.Count -eq 0
+    $hasWorktreeOnly = $stagedFiles.Count -eq 0 -and ($unstagedFiles.Count -gt 0 -or $untrackedFiles.Count -gt 0)
+    $hasMixedChanges = $stagedFiles.Count -gt 0 -and ($unstagedFiles.Count -gt 0 -or $untrackedFiles.Count -gt 0)
+
+    if ($hasMixedChanges) {
+        Write-Fail "Mixed staged and unstaged changes detected."
+        Write-Notice "Sync will not combine separately staged work with unstaged/untracked files."
+        Write-Notice "Commit or stash the staged work first, then rerun sync."
+        exit 1
+    }
+
+    if ($hasWorktreeOnly) {
+        Write-Status "No pre-staged changes found. Staging current working-tree changes..."
+        git add -A
+        if ($LASTEXITCODE -ne 0) {
+            Write-Fail "git add failed."
+            exit $LASTEXITCODE
+        }
+    }
+    elseif ($hasStagedOnly) {
+        Write-Status "Using the existing staged changes without modifying the index."
+    }
 
     $secretHits = Find-StagedSecrets
     if (@($secretHits).Count -gt 0) {
@@ -510,10 +567,13 @@ try {
             Write-Host "    Pattern: $($hit.Pattern)" -ForegroundColor Yellow
             Write-Host "    Snippet: $($hit.Snippet)" -ForegroundColor Gray
         }
-        Write-Notice "Staged files have been un-staged for safety. Please remove credentials before committing."
-        git reset --quiet
+        if ($hasWorktreeOnly) {
+            Write-Notice "Staged files are being un-staged for safety."
+            git reset --quiet
+        }
         exit 1
     }
+
 
     # 5. Determine commit message
     if (-not $Message) {
