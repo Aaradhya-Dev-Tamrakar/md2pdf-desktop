@@ -1,14 +1,14 @@
 # Markdown → PDF Converter (`md2pdf-desktop`)
 
-An intelligent, publication-grade Markdown to PDF converter with native mathematical typesetting, full vector Mermaid diagrams, GitHub Flavored Markdown (GFM) alerts, automatic table formatting, and modern IDE sidebar visual fidelity.
+A Markdown-to-PDF converter designed for technical documents, with mathematical typesetting, Mermaid diagrams, GitHub Flavored Markdown (GFM) alerts, table formatting, and an IDE-inspired Sidebar renderer.
 
 Three operational surfaces:
 
-- **Desktop Studio** ([`md2pdf_app.py`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/md2pdf_app.py)) — A modern desktop GUI built with `ui-ux-pro-max` design standards, live toolchain telemetry, real-time syntax auto-detection, and document metrics.
-- **MCP Server** ([`mcp_server/server.py`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/mcp_server/server.py)) — FastMCP server exposing headless conversion tools to Google Antigravity, Claude Code, and Claude Desktop.
-- **PowerShell Sync Engine** ([`sync.ps1`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/sync.ps1)) — Automated git synchronization, pre-commit secret scanning, and toolchain health validation.
+- **Desktop Studio** ([`md2pdf_app.py`](./md2pdf_app.py)) — A modern desktop GUI built with `ui-ux-pro-max` design standards, live toolchain telemetry, real-time syntax auto-detection, and document metrics.
+- **MCP Server** ([`mcp_server/server.py`](./mcp_server/server.py)) — FastMCP server exposing headless conversion tools to Google Antigravity, Claude Code, and Claude Desktop.
+- **PowerShell Sync Engine** ([`sync.ps1`](./sync.ps1)) — Automated git synchronization, pre-commit secret scanning, and toolchain health validation.
 
-All surfaces share a unified conversion core ([`md2pdf/core.py`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/md2pdf/core.py)), ensuring identical, textbook-grade output everywhere.
+All surfaces share conversion functions in [`md2pdf/core.py`](./md2pdf/core.py). Explicit renderer modes intentionally produce different styling; automatic backend selection is centralized in the shared core. Output should be reviewed for visual correctness before publication.
 
 ---
 
@@ -24,7 +24,7 @@ All surfaces share a unified conversion core ([`md2pdf/core.py`](file:///F:/Aara
 - **Dual Themes**:
   - **Light Mode (`theme="light"`, Default)**: Pure white canvas (`#ffffff`), dark slate typography (`#111827`), blue question accents (`#1d4ed8`), violet algorithm headers (`#7c3aed`), and light-themed diagram nodes. Ideal for physical paper printing.
   - **Dark Mode (`theme="dark"`)**: Deep zinc palette (`#18181b`) matching dark IDE preview panels.
-- **Smart Page-Break Rules**: Prevents breaking inside math blocks, tables, code listings, and flowchart diagrams.
+- **Print Pagination**: Uses Chromium's print layout and page CSS. Complex equations, tables, code, and diagrams should be checked in the generated PDF because browser pagination can still split content.
 - **Zero Heavy TeX Overhead**: Uses the Google Chrome or Microsoft Edge executable already installed on your system.
 
 ### 2. 📐 LaTeX Formal Mode
@@ -139,9 +139,26 @@ The repository includes a dedicated sync engine enforcing pre-commit secret scan
 
 ## 📂 Repository Structure
 
-- [`md2pdf/core.py`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/md2pdf/core.py) — Core conversion pipelines (`convert_sidebar`, `convert_latex`, `convert_simple`, `convert_auto`), AST sanitizers, and CSS templates.
-- [`md2pdf_app.py`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/md2pdf_app.py) — Modern Tkinter desktop application (`md2pdf Studio`).
-- [`mcp_server/server.py`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/mcp_server/server.py) — FastMCP server for AI agent workflows.
-- [`md2pdf/templates/styled.latex`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/md2pdf/templates/styled.latex) — Pandoc LaTeX template for formal print outputs.
-- [`md2pdf/templates/callout-boxes.lua`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/md2pdf/templates/callout-boxes.lua) — Lua filter for LaTeX tcolorbox mapping.
-- [`sync.ps1`](file:///F:/Aaradhya-Dev-Tamrakar/md2pdf-desktop/sync.ps1) — Automated sync engine and secret guard.
+- [`md2pdf/core.py`](./md2pdf/core.py) — Core conversion pipelines (`convert_sidebar`, `convert_latex`, `convert_simple`, `convert_auto`), AST sanitizers, and CSS templates.
+- [`md2pdf_app.py`](./md2pdf_app.py) — Modern Tkinter desktop application (`md2pdf Studio`).
+- [`mcp_server/server.py`](./mcp_server/server.py) — FastMCP server for AI agent workflows.
+- [`md2pdf/templates/styled.latex`](./md2pdf/templates/styled.latex) — Pandoc LaTeX template for formal print outputs.
+- [`md2pdf/templates/callout-boxes.lua`](./md2pdf/templates/callout-boxes.lua) — Lua filter for LaTeX tcolorbox mapping.
+- [`sync.ps1`](./sync.ps1) — Automated sync engine and secret guard.
+
+
+---
+
+## 🧪 Reliability checks
+
+Run the standard-library regression suite:
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+The tests cover PDF output integrity checks and automatic-renderer fallback behavior. They do not replace end-to-end tests against real Pandoc, Chromium, LaTeX, and wkhtmltopdf installations.
+
+### Reproducibility note
+
+Sidebar mode currently loads KaTeX and Mermaid resources from external CDN URLs. It therefore requires network access for those resources and is not yet fully self-contained or guaranteed to render identically offline. See [the stabilization notes](./docs/STABILIZATION_NOTES.md) for the current validation contract and remaining risks.
