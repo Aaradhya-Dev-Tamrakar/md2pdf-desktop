@@ -12,6 +12,7 @@ import argparse
 import base64
 import hashlib
 import io
+import json
 import os
 import shutil
 import tarfile
@@ -92,6 +93,66 @@ def _extract_selected(archive_bytes: bytes, destination: Path, prefixes: tuple[s
                 shutil.copyfileobj(source, output)
 
 
+def _asset_files(root: Path):
+    return sorted(
+        path for path in root.rglob("*")
+        if path.is_file() and path.name != "manifest.json"
+    )
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _write_manifest(root: Path) -> None:
+    manifest = {
+        "schema": 1,
+        "packages": {
+            name: {
+                "version": spec["version"],
+                "integrity": spec["integrity"],
+            }
+            for name, spec in ASSET_SPEC.items()
+        },
+        "files": {
+            path.relative_to(root).as_posix(): _file_sha256(path)
+            for path in _asset_files(root)
+        },
+    }
+    with open(root / "manifest.json", "w", encoding="utf-8") as stream:
+        json.dump(manifest, stream, indent=2, sort_keys=True)
+        stream.write("\n")
+
+
+def _cache_is_verified(root: Path) -> bool:
+    if not _required_assets_present(root):
+        return False
+    try:
+        with open(root / "manifest.json", "r", encoding="utf-8") as stream:
+            manifest = json.load(stream)
+        expected_packages = {
+            name: {
+                "version": spec["version"],
+                "integrity": spec["integrity"],
+            }
+            for name, spec in ASSET_SPEC.items()
+        }
+        if manifest.get("schema") != 1 or manifest.get("packages") != expected_packages:
+            return False
+        expected_files = manifest.get("files")
+        actual_files = {
+            path.relative_to(root).as_posix(): _file_sha256(path)
+            for path in _asset_files(root)
+        }
+        return expected_files == actual_files
+    except (OSError, ValueError, TypeError):
+        return False
+
+
 def _required_assets_present(root: Path) -> bool:
     required = (
         root / "katex.min.css",
@@ -111,7 +172,7 @@ def ensure_web_assets(*, offline: bool = False, asset_dir: Path | None = None) -
     requested (or MD2PDF_OFFLINE=1 is set).
     """
     root = (asset_dir or default_asset_dir()).resolve()
-    if _required_assets_present(root):
+    if _cache_is_verified(root):
         return root
 
     if offline or os.environ.get("MD2PDF_OFFLINE") == "1":
@@ -149,6 +210,9 @@ def ensure_web_assets(*, offline: bool = False, asset_dir: Path | None = None) -
         staging.rename(root)
         if not _required_assets_present(root):
             raise RuntimeError(f"Asset provisioning completed incompletely: {root}")
+        _write_manifest(root)
+        if not _cache_is_verified(root):
+            raise RuntimeError(f"Asset manifest verification failed: {root}")
         return root
     except Exception:
         if staging.exists():
