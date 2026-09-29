@@ -97,7 +97,7 @@ class AutoOrchestrationTests(unittest.TestCase):
                     "pandoc": True, "chromium": True,
                     "pdflatex": True, "wkhtmltopdf": True,
                 }),
-                mock.patch.object(core, "detect_sidebar_needed", return_value=(True, "Mermaid")),
+                mock.patch.object(core, "detect_sidebar_needed", return_value=(True, "math notation")),
                 mock.patch.object(core, "detect_latex_needed", return_value=(False, None)),
                 mock.patch.object(core, "convert_sidebar", side_effect=RuntimeError("renderer failed")),
                 mock.patch.object(core, "convert_simple", side_effect=write_pdf),
