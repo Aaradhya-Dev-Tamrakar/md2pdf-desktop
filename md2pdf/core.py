@@ -11,6 +11,9 @@ import re
 import shutil
 import subprocess
 import tempfile
+from pathlib import Path
+
+from .web_assets import ensure_web_assets
 
 
 
@@ -919,10 +922,7 @@ HTML_SIDEBAR_WRAPPER = """<!DOCTYPE html>
 <head>
   <meta charset="utf-8">
   <title>Document</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  {asset_head}
   {css}
 </head>
 <body>
@@ -1020,7 +1020,10 @@ def convert_sidebar(md_content: str, save_path: str, margin: str = "14mm", theme
         with open(body_html_file, "r", encoding="utf-8") as f:
             body_content = f.read()
 
+        asset_head = build_sidebar_asset_head()
+
         full_html = HTML_SIDEBAR_WRAPPER.format(
+            asset_head=asset_head,
             css=css_content,
             body=body_content,
             mermaid_theme=mermaid_theme,
@@ -1039,7 +1042,7 @@ def convert_sidebar(md_content: str, save_path: str, margin: str = "14mm", theme
             chrome,
             "--headless=new",
             "--disable-gpu",
-            "--allow-running-insecure-content",
+            "--allow-file-access-from-files",
             "--virtual-time-budget=10000",
             "--run-all-compositor-stages-before-draw",
             "--no-pdf-header-footer",
