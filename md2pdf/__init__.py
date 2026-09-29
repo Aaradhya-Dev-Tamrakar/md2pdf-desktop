@@ -4,6 +4,7 @@ from .core import (
     check_tools,
     convert_auto,
     validate_pdf_output,
+    build_sidebar_asset_head,
     convert_latex,
     convert_sidebar,
     convert_simple,
@@ -19,6 +20,7 @@ __all__ = [
     "check_tools",
     "convert_auto",
     "validate_pdf_output",
+    "build_sidebar_asset_head",
     "convert_latex",
     "convert_sidebar",
     "convert_simple",
@@ -26,5 +28,7 @@ __all__ = [
     "detect_sidebar_needed",
     "find_chromium",
     "probe_latex_template",
+    "ensure_web_assets",
 ]
 
+from .web_assets import ensure_web_assets
