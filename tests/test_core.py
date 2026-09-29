@@ -39,6 +39,50 @@ class PdfValidationTests(unittest.TestCase):
                 core.validate_pdf_output(os.path.join(tmp, "missing.pdf"))
 
 
+class AtomicOutputTests(unittest.TestCase):
+    def test_failed_simple_render_does_not_replace_existing_pdf(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = os.path.join(tmp, "result.pdf")
+            with open(output, "wb") as stream:
+                stream.write(MINIMAL_PDF)
+
+            def fake_process(args, **_kwargs):
+                if args[0] == "pandoc":
+                    with open(args[3], "w", encoding="utf-8") as stream:
+                        stream.write("<html><head></head><body>ok</body></html>")
+                return type("Result", (), {"returncode": 0, "stderr": ""})()
+
+            with mock.patch.object(core, "_run_process", side_effect=fake_process):
+                with self.assertRaisesRegex(RuntimeError, "did not create"):
+                    core.convert_simple("hello", output)
+
+            with open(output, "rb") as stream:
+                self.assertEqual(stream.read(), MINIMAL_PDF)
+
+    def test_successful_atomic_publish_replaces_existing_pdf(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = os.path.join(tmp, "result.pdf")
+            old_pdf = b"%PDF-1.4\n1 0 obj << /Type /Page >> endobj\n%%EOF\n"
+            new_pdf = b"%PDF-1.4\n2 0 obj << /Type /Page >> endobj\n%%EOF\n"
+            with open(output, "wb") as stream:
+                stream.write(old_pdf)
+
+            def fake_process(args, **_kwargs):
+                if args[0] == "pandoc":
+                    with open(args[3], "w", encoding="utf-8") as stream:
+                        stream.write("<html><head></head><body>ok</body></html>")
+                else:
+                    with open(args[-1], "wb") as stream:
+                        stream.write(new_pdf)
+                return type("Result", (), {"returncode": 0, "stderr": ""})()
+
+            with mock.patch.object(core, "_run_process", side_effect=fake_process):
+                core.convert_simple("hello", output)
+
+            with open(output, "rb") as stream:
+                self.assertEqual(stream.read(), new_pdf)
+
+
 class AutoOrchestrationTests(unittest.TestCase):
     def test_falls_back_and_returns_actual_backend(self):
         with tempfile.TemporaryDirectory() as tmp:
