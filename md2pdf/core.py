@@ -100,7 +100,7 @@ def _protect_fenced_blocks(text: str):
     opening_length = 0
 
     for line in lines:
-        match = re.match(r"^[ \\t]{0,3}(`{3,}|~{3,})(.*)$", line)
+        match = re.match(r"^[ \t]{0,3}(`{3,}|~{3,})(.*)$", line)
         if opening_char is None:
             if match:
                 marker = match.group(1)
@@ -122,7 +122,7 @@ def _protect_fenced_blocks(text: str):
             ):
                 index = len(protected)
                 protected.append("".join(current))
-        output.append(f"\x00MD2PDF_BLOCK_{index}\x00")
+                output.append(f"\x00MD2PDF_BLOCK_{index}\x00")
                 current = []
                 opening_char = None
                 opening_length = 0
