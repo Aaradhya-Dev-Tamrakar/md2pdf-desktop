@@ -45,7 +45,6 @@ jobs:
           cd /tmp/md2pdf-package-smoke
           md2pdf --help
           python -m md2pdf.cli --help
-
   renderer-integration:
     runs-on: ubuntu-latest
     steps:
@@ -59,3 +58,25 @@ jobs:
           python-version: "3.12"
       - name: Run real renderer integration test
         run: python -m unittest tests.test_renderer_integration -v
+
+  sidebar-integration:
+    runs-on: ubuntu-latest
+    env:
+      MD2PDF_ASSET_DIR: ${{ runner.temp }}/md2pdf-web-assets
+      MD2PDF_SIDEBAR_INTEGRATION: "1"
+      MD2PDF_OFFLINE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native Sidebar toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pandoc chromium
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Provision exact browser assets
+        env:
+          MD2PDF_OFFLINE: "0"
+        run: python -m md2pdf.web_assets --asset-dir "$MD2PDF_ASSET_DIR"
+      - name: Run real Sidebar integration test offline
+        run: python -m unittest tests.test_sidebar_integration -v
