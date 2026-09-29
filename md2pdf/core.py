@@ -969,6 +969,26 @@ HTML_SIDEBAR_WRAPPER = """<!DOCTYPE html>
 """
 
 
+def _asset_uri(path: Path) -> str:
+    """Return a local file URI suitable for Chromium."""
+    return path.resolve().as_uri()
+
+
+def build_sidebar_asset_head(asset_dir: Path | None = None) -> str:
+    """Build local KaTeX/Mermaid resource tags without CDN requests."""
+    root = ensure_web_assets(asset_dir=asset_dir)
+    katex_css = _asset_uri(root / "katex.min.css")
+    katex_js = _asset_uri(root / "katex.min.js")
+    auto_render = _asset_uri(root / "contrib" / "auto-render.min.js")
+    mermaid_js = _asset_uri(root / "mermaid.min.js")
+    return (
+        f'<link rel="stylesheet" href="{katex_css}">\n'
+        f'<script defer src="{katex_js}"></script>\n'
+        f'<script defer src="{auto_render}"></script>\n'
+        f'<script defer src="{mermaid_js}"></script>'
+    )
+
+
 def convert_sidebar(md_content: str, save_path: str, margin: str = "14mm", theme: str = "light") -> None:
     """Converts Markdown to PDF using Headless Chromium + KaTeX + Mermaid.js.
     Provides identical visual fidelity to the modern IDE Markdown preview sidebar.
