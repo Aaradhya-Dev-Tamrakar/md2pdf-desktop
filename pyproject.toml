@@ -8,7 +8,6 @@ version = "0.2.0"
 description = "Technical Markdown-to-PDF conversion with desktop and MCP interfaces"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Proprietary - see repository license status" }
 dependencies = []
 
 [project.scripts]
@@ -17,3 +16,6 @@ md2pdf = "md2pdf.cli:main"
 [tool.setuptools]
 packages = ["md2pdf"]
 include-package-data = true
+
+[tool.setuptools.package-data]
+md2pdf = ["templates/*.latex", "templates/*.lua"]
