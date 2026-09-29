@@ -15,7 +15,7 @@ All surfaces share conversion functions in [`md2pdf/core.py`](./md2pdf/core.py).
 ## 🚀 Conversion Engines
 
 ### 1. 🌟 Sidebar Mode (Default & Recommended)
-**Pipeline:** `pandoc` (MD → HTML5 AST) → Injected KaTeX + Mermaid.js → Headless Chromium (Google Chrome / Microsoft Edge) → Vector PDF.
+**Pipeline:** `pandoc` (MD → HTML5 AST) → locally provisioned KaTeX + Mermaid assets → Headless Chromium (Google Chrome / Microsoft Edge) → Vector PDF.
 
 - **Visual Match**: Renders Markdown with visual fidelity matching the modern IDE Markdown preview sidebar (Google Antigravity, VS Code, GitHub).
 - **Mermaid Vector Diagrams**: Renders ```` ```mermaid ```` flowcharts, sequence diagrams, and state charts directly into vector SVGs.
@@ -25,7 +25,7 @@ All surfaces share conversion functions in [`md2pdf/core.py`](./md2pdf/core.py).
   - **Light Mode (`theme="light"`, Default)**: Pure white canvas (`#ffffff`), dark slate typography (`#111827`), blue question accents (`#1d4ed8`), violet algorithm headers (`#7c3aed`), and light-themed diagram nodes. Ideal for physical paper printing.
   - **Dark Mode (`theme="dark"`)**: Deep zinc palette (`#18181b`) matching dark IDE preview panels.
 - **Print Pagination**: Uses Chromium's print layout and page CSS. Complex equations, tables, code, and diagrams should be checked in the generated PDF because browser pagination can still split content.
-- **Zero Heavy TeX Overhead**: Uses the Google Chrome or Microsoft Edge executable already installed on your system.
+- **Deterministic Browser Assets**: KaTeX and Mermaid are pinned to exact package versions, downloaded from npm package tarballs with SHA-512 verification, then cached locally. Subsequent offline conversions do not contact a CDN.
 
 ### 2. 📐 LaTeX Formal Mode
 **Pipeline:** `pandoc` (MD → LaTeX, via `md2pdf/templates/styled.latex`) → `pdflatex`.
@@ -126,6 +126,7 @@ python mcp_server/server.py
   ```
 - **Chromium** (for Sidebar mode — either Google Chrome or Microsoft Edge):
   - Pre-installed on Windows (`msedge.exe` or `chrome.exe`).
+  - The first Sidebar conversion provisions pinned browser assets from npm; later runs reuse the local cache.
 - **Optional Tools**:
   - `pdflatex` (TeX Live or MiKTeX) for LaTeX Formal mode.
   - `wkhtmltopdf` for Simple mode.
@@ -182,4 +183,4 @@ The tests cover PDF output integrity checks, automatic-renderer fallback behavio
 
 ### Reproducibility note
 
-Sidebar mode currently loads KaTeX and Mermaid resources from external CDN URLs. It therefore requires network access for those resources and is not yet fully self-contained or guaranteed to render identically offline. See [the stabilization notes](./docs/STABILIZATION_NOTES.md) for the current validation contract and remaining risks.
+Sidebar mode no longer loads KaTeX or Mermaid from a CDN at render time. The exact KaTeX 0.16.11 and Mermaid 10.9.3 npm package tarballs are SHA-512 verified before the required browser assets are extracted into a local cache. Set `MD2PDF_OFFLINE=1` to forbid network provisioning and require an existing verified cache. Browser, operating-system, and font rendering differences can still affect pixel-level output; the project therefore validates artifact integrity and exercises the real Chromium path in CI rather than claiming byte-for-byte PDF identity.
