@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "md2pdf-desktop"
+version = "0.2.0"
+description = "Technical Markdown-to-PDF conversion with desktop and MCP interfaces"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary - see repository license status" }
+dependencies = []
+
+[project.scripts]
+md2pdf = "md2pdf.cli:main"
+
+[tool.setuptools]
+packages = ["md2pdf"]
+include-package-data = true
