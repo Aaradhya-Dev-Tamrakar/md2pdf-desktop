@@ -101,7 +101,7 @@ python mcp_server/server.py
 
 ## 📦 System Requirements
 
-- **Python 3.8+**
+- **Python 3.10+**
 - **Pandoc** (required for all modes):
   ```powershell
   choco install pandoc
