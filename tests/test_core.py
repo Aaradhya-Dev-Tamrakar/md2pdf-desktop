@@ -80,11 +80,11 @@ class AutoOrchestrationTests(unittest.TestCase):
 class MarkdownNormalizationTests(unittest.TestCase):
     def test_preserves_fenced_code_during_global_replacements(self):
         source = (
-            "A prose dash — and logic ∧ symbol.\\n\\n"
-            "```python\\n"
-            "message = '— ∧ θ 📂'\\n"
-            "print(message)\\n"
-            "```\\n"
+            "A prose dash — and logic ∧ symbol.\n\n"
+            "```python\n"
+            "message = '— ∧ θ 📂'\n"
+            "print(message)\n"
+            "```\n"
         )
         cleaned = core.clean_markdown_for_pdf(source)
         self.assertIn("A prose dash -- and logic", cleaned)
@@ -92,8 +92,8 @@ class MarkdownNormalizationTests(unittest.TestCase):
 
     def test_converts_mermaid_but_preserves_other_fences(self):
         source = (
-            "```mermaid\\nflowchart TD\\nA --> B\\n```\\n\\n"
-            "```python\\nprint('∨ θ')\\n```"
+            "```mermaid\nflowchart TD\nA --> B\n```\n\n"
+            "```python\nprint('∨ θ')\n```"
         )
         cleaned = core.clean_markdown_for_pdf(source)
         self.assertIn("Diagram (Flowchart)", cleaned)
