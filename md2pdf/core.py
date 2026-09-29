@@ -310,10 +310,8 @@ def clean_markdown_for_pdf(md_content: str, mode: str = "auto") -> str:
     mermaid_pattern = fence * 3 + r"mermaid\s*\n(.*?)\n" + fence * 3
     text = re.sub(mermaid_pattern, _replace_mermaid, text, flags=re.DOTALL)
 
-    # Protect all remaining fenced blocks before any global normalization.
-    text, protected_blocks = _protect_fenced_blocks(text)
-
-    # Convert only explicitly labelled text/ascii grid tables. Unlabelled
+    # Convert explicitly labelled text/ascii grid tables before protecting
+    # code, since these fences are intentionally converted into Markdown tables.
     # code fences remain code and are restored unchanged below.
     def _replace_ascii_tables(match):
         code_body = match.group(1).strip()
@@ -335,6 +333,9 @@ def clean_markdown_for_pdf(md_content: str, mode: str = "auto") -> str:
         + fence * 3
     )
     text = re.sub(labelled_pattern, _replace_ascii_tables, text, flags=re.DOTALL)
+
+    # Protect all remaining fenced blocks before document-wide normalization.
+    text, protected_blocks = _protect_fenced_blocks(text)
 
     # Convert naked ASCII grid tables, which are unambiguously table-shaped.
     def _replace_naked_ascii_tables(match):
