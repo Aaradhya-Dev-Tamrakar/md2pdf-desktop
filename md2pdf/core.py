@@ -284,7 +284,7 @@ def clean_markdown_for_pdf(md_content: str, mode: str = "auto") -> str:
     if not md_content:
         return ""
 
-    text = md_content.replace("\ufffd", "-")
+    text = md_content
     fence = chr(96)
 
     # Mermaid is a semantic diagram block, so transform it before ordinary
@@ -336,6 +336,7 @@ def clean_markdown_for_pdf(md_content: str, mode: str = "auto") -> str:
 
     # Protect all remaining fenced blocks before document-wide normalization.
     text, protected_blocks = _protect_fenced_blocks(text)
+    text = text.replace("\ufffd", "-")
 
     # Convert naked ASCII grid tables, which are unambiguously table-shaped.
     def _replace_naked_ascii_tables(match):
@@ -559,10 +560,11 @@ def clean_markdown_for_sidebar(md_content: str) -> str:
     """Prepare Markdown for Chromium while preserving ordinary code blocks."""
     if not md_content:
         return ""
-    text = md_content.replace("\ufffd", "-")
+    text = md_content
     text = transform_gfm_alerts(text)
     text = prepare_mermaid_for_html(text)
     text, protected_blocks = _protect_fenced_blocks(text)
+    text = text.replace("\ufffd", "-")
 
     text = re.sub(r"\\\\\(", "$", text)
     text = re.sub(r"\\\\\)", "$", text)
