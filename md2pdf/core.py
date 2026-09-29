@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 from .web_assets import ensure_web_assets
@@ -77,6 +78,22 @@ def validate_pdf_output(path: str) -> None:
     if not has_page_object:
         raise RuntimeError(f"PDF contains no detectable page objects: {path}")
 
+
+@contextmanager
+def _atomic_output_path(save_path: str):
+    """Yield a temporary PDF path and publish it atomically after validation.
+
+    Rendering into a sibling temporary directory prevents a failed renderer
+    from truncating or replacing an existing valid PDF at save_path.
+    """
+    final_path = os.path.abspath(save_path)
+    parent = os.path.dirname(final_path) or os.getcwd()
+    os.makedirs(parent, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".md2pdf-", dir=parent) as tmp:
+        temporary_path = os.path.join(tmp, os.path.basename(final_path))
+        yield temporary_path
+        validate_pdf_output(temporary_path)
+        os.replace(temporary_path, final_path)
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -448,39 +465,39 @@ def convert_simple(md_content: str, save_path: str, margin: str = "0.5in") -> No
     """
     cleaned = clean_markdown_for_pdf(md_content, mode="simple")
     margin_str = _normalize_margin(margin)
-    with tempfile.TemporaryDirectory() as tmp:
-        md_file = os.path.join(tmp, "doc.md")
-        html_file = os.path.join(tmp, "doc.html")
+    with _atomic_output_path(save_path) as temporary_output:
+        with tempfile.TemporaryDirectory() as tmp:
+            md_file = os.path.join(tmp, "doc.md")
+            html_file = os.path.join(tmp, "doc.html")
 
-        with open(md_file, "w", encoding="utf-8") as f:
-            f.write(cleaned)
+            with open(md_file, "w", encoding="utf-8") as f:
+                f.write(cleaned)
 
-        result = _run_process(
-            ["pandoc", md_file, "-o", html_file, "--standalone", "--webtex"],
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"pandoc failed:\n{result.stderr}")
+            result = _run_process(
+                ["pandoc", md_file, "-o", html_file, "--standalone", "--webtex"],
+                capture_output=True, text=True,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"pandoc failed:\n{result.stderr}")
 
-        with open(html_file, "r", encoding="utf-8") as f:
-            html = f.read()
-        html = html.replace("</head>", DEFAULT_CSS + "</head>")
-        with open(html_file, "w", encoding="utf-8") as f:
-            f.write(html)
+            with open(html_file, "r", encoding="utf-8") as f:
+                html = f.read()
+            html = html.replace("</head>", DEFAULT_CSS + "</head>")
+            with open(html_file, "w", encoding="utf-8") as f:
+                f.write(html)
 
-        result = _run_process(
-            [
-                "wkhtmltopdf", "--encoding", "utf-8",
-                "--enable-local-file-access",
-                "--margin-top", margin_str, "--margin-bottom", margin_str,
-                "--margin-left", margin_str, "--margin-right", margin_str,
-                html_file, save_path,
-            ],
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"wkhtmltopdf failed:\n{result.stderr.strip()}")
-        validate_pdf_output(save_path)
+            result = _run_process(
+                [
+                    "wkhtmltopdf", "--encoding", "utf-8",
+                    "--enable-local-file-access",
+                    "--margin-top", margin_str, "--margin-bottom", margin_str,
+                    "--margin-left", margin_str, "--margin-right", margin_str,
+                    html_file, temporary_output,
+                ],
+                capture_output=True, text=True,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"wkhtmltopdf failed:\n{result.stderr.strip()}")
 
 
 def convert_latex(md_content: str, save_path: str, margin: str = "0.5in") -> None:
@@ -496,26 +513,26 @@ def convert_latex(md_content: str, save_path: str, margin: str = "0.5in") -> Non
     cleaned = clean_markdown_for_pdf(md_content, mode="latex")
     margin_str = _normalize_margin(margin)
 
-    with tempfile.TemporaryDirectory() as tmp:
-        md_file = os.path.join(tmp, "doc.md")
-        with open(md_file, "w", encoding="utf-8") as f:
-            f.write(cleaned)
+    with _atomic_output_path(save_path) as temporary_output:
+        with tempfile.TemporaryDirectory() as tmp:
+            md_file = os.path.join(tmp, "doc.md")
+            with open(md_file, "w", encoding="utf-8") as f:
+                f.write(cleaned)
 
-        filter_args = ["--lua-filter", LUA_FILTER] if os.path.isfile(LUA_FILTER) else []
-        cmd = (
-            ["pandoc", md_file]
-            + filter_args
-            + [
-                "--template", LATEX_TEMPLATE,
-                "--pdf-engine", "pdflatex",
-                "-V", f"margin={margin_str}",
-                "-o", save_path,
-            ]
-        )
-        result = _run_process(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(f"pandoc/pdflatex failed:\n{result.stderr.strip()}")
-        validate_pdf_output(save_path)
+            filter_args = ["--lua-filter", LUA_FILTER] if os.path.isfile(LUA_FILTER) else []
+            cmd = (
+                ["pandoc", md_file]
+                + filter_args
+                + [
+                    "--template", LATEX_TEMPLATE,
+                    "--pdf-engine", "pdflatex",
+                    "-V", f"margin={margin_str}",
+                    "-o", temporary_output,
+                ]
+            )
+            result = _run_process(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(f"pandoc/pdflatex failed:\n{result.stderr.strip()}")
 
 
 # ---------------------------------------------------------------------------
@@ -1018,13 +1035,14 @@ def convert_sidebar(md_content: str, save_path: str, margin: str = "14mm", theme
         line_color = "#4b5563"
         border_color = "#374151"
 
-    with tempfile.TemporaryDirectory() as tmp:
-        md_file = os.path.join(tmp, "doc.md")
-        body_html_file = os.path.join(tmp, "body.html")
-        final_html_file = os.path.join(tmp, "final.html")
+    with _atomic_output_path(save_path) as temporary_output:
+        with tempfile.TemporaryDirectory() as tmp:
+            md_file = os.path.join(tmp, "doc.md")
+            body_html_file = os.path.join(tmp, "body.html")
+            final_html_file = os.path.join(tmp, "final.html")
 
-        with open(md_file, "w", encoding="utf-8") as f:
-            f.write(cleaned)
+            with open(md_file, "w", encoding="utf-8") as f:
+                f.write(cleaned)
 
         # Render markdown to HTML fragment via pandoc
         res = _run_process([
@@ -1066,7 +1084,7 @@ def convert_sidebar(md_content: str, save_path: str, margin: str = "14mm", theme
             "--virtual-time-budget=10000",
             "--run-all-compositor-stages-before-draw",
             "--no-pdf-header-footer",
-            f"--print-to-pdf={save_path}",
+            f"--print-to-pdf={temporary_output}",
             final_html_file,
         ]
 
