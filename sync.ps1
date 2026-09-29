@@ -230,6 +230,33 @@ function Find-StagedSecrets {
     return @(Find-DiffSecrets -DiffText (git diff --cached -U0 2>$null))
 }
 
+function Get-CandidateDiff {
+    $parts = @()
+    $trackedDiff = git diff HEAD -U0 2>$null
+    if ($trackedDiff) { $parts += $trackedDiff }
+
+    $untrackedFiles = @(git ls-files --others --exclude-standard 2>$null)
+    foreach ($path in $untrackedFiles) {
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        try {
+            $item = Get-Item -LiteralPath $path -ErrorAction Stop
+            if (-not $item.PSIsContainer -and $item.Length -le 1048576) {
+                $parts += "+++ b/$path"
+                $contents = Get-Content -LiteralPath $path -Raw -ErrorAction Stop
+                if ($null -ne $contents) {
+                    foreach ($line in ($contents -split [Environment]::NewLine)) {
+                        $parts += "+$line"
+                    }
+                }
+            }
+        }
+        catch {
+            Write-Notice "[WhatIf] Could not inspect untracked file '$path' for secrets."
+        }
+    }
+    return ($parts -join [Environment]::NewLine)
+}
+
 
 function Get-AutoCommitMessage {
     param([string]$ActiveBranch = "main")
@@ -514,7 +541,7 @@ try {
         Write-Notice "[WhatIf] Local changes detected on [$currentBranch]. Previewing without changing the Git index:"
         git status --short
 
-        $candidateDiff = git diff HEAD -U0 2>$null
+        $candidateDiff = Get-CandidateDiff
         $secretHits = Find-DiffSecrets -DiffText $candidateDiff
         if (@($secretHits).Count -gt 0) {
             Write-Fail "[WhatIf] Security Alert: Found possible secret(s) in pending changes:"
