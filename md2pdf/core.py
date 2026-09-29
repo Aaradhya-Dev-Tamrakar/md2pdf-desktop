@@ -86,41 +86,51 @@ LUA_FILTER = os.path.join(PACKAGE_DIR, "templates", "callout-boxes.lua")
 # Context-aware Markdown protection
 # ---------------------------------------------------------------------------
 def _protect_fenced_blocks(text: str):
-    """Protect ordinary fenced code blocks from global normalization.
+    """Protect Markdown fenced blocks from document-wide text normalization.
 
-    Mermaid fences are intentionally transformed before this helper runs.
-    All other fenced blocks are restored byte-for-byte before Pandoc sees them.
+    Tracks the opening fence character and length, including valid unclosed
+    fences that continue to end-of-file. Mermaid blocks should be transformed
+    before this helper is called.
     """
     lines = text.splitlines(keepends=True)
     protected = []
     output = []
     current = []
-    fence_char = chr(96)
-    in_fence = False
+    opening_char = None
+    opening_length = 0
 
     for line in lines:
-        stripped = line.lstrip()
-        starts_backtick = stripped.startswith(fence_char * 3)
-        starts_tilde = stripped.startswith("~~~")
-        if not in_fence and (starts_backtick or starts_tilde):
-            in_fence = True
-            current = [line]
+        match = re.match(r"^[ \\t]{0,3}(`{3,}|~{3,})(.*)$", line)
+        if opening_char is None:
+            if match:
+                marker = match.group(1)
+                opening_char = marker[0]
+                opening_length = len(marker)
+                current = [line]
+            else:
+                output.append(line)
             continue
-        if in_fence:
-            current.append(line)
-            closing_backtick = stripped.startswith(fence_char * 3)
-            closing_tilde = stripped.startswith("~~~")
-            if closing_backtick or closing_tilde:
+
+        current.append(line)
+        if match:
+            marker = match.group(1)
+            info = match.group(2)
+            if (
+                marker[0] == opening_char
+                and len(marker) >= opening_length
+                and not info.strip()
+            ):
                 index = len(protected)
                 protected.append("".join(current))
-                output.append(f"\x00MD2PDF_BLOCK_{index}\x00")
+                output.append(f"\\x00MD2PDF_BLOCK_{index}\\x00")
                 current = []
-                in_fence = False
-            continue
-        output.append(line)
+                opening_char = None
+                opening_length = 0
 
     if current:
-        output.extend(current)
+        index = len(protected)
+        protected.append("".join(current))
+        output.append(f"\\x00MD2PDF_BLOCK_{index}\\x00")
     return "".join(output), protected
 
 
