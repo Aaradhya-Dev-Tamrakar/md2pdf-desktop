@@ -65,6 +65,15 @@ md2pdf notes.md --mode sidebar --theme dark --margin 14mm
 
 The CLI reports the selected renderer and returns a non-zero exit code for invalid input or conversion failures. Pandoc and the chosen renderer executable remain system dependencies; installing the Python package does not install those tools. MCP server dependencies remain in `requirements.txt`.
 
+Provision or verify the Sidebar browser assets explicitly:
+
+```powershell
+python -m md2pdf.web_assets
+python -m md2pdf.web_assets --offline
+```
+
+Set `MD2PDF_OFFLINE=1` to make Sidebar conversion cache-only. The cache is stored outside the Python installation and is re-hash-verified from its manifest.
+
 ## 🎨 Desktop Studio GUI (`md2pdf_app.py`)
 
 Run the desktop application:
