@@ -41,6 +41,7 @@ from pydantic import BaseModel, Field
 
 from md2pdf import (
     check_tools,
+    convert_auto,
     convert_latex,
     convert_sidebar,
     convert_simple,
@@ -134,18 +135,21 @@ def convert_markdown_to_pdf(params: ConvertInput) -> str:
     tools = check_tools()
     mode = params.mode
 
+    # AUTO is delegated to the shared core orchestrator so the desktop and MCP
+    # interfaces use the same backend ordering, fallback policy, and validation.
     if mode == ConversionMode.AUTO:
-        needed_sidebar, reason_sidebar = detect_sidebar_needed(params.markdown)
-        if needed_sidebar and tools.get("chromium") and tools.get("pandoc"):
-            mode = ConversionMode.SIDEBAR
-            auto_note = f" (auto-detected: {reason_sidebar})"
-        else:
-            needed, reason = detect_latex_needed(params.markdown)
-            latex_available = tools["pandoc"] and tools["pdflatex"]
-            mode = ConversionMode.LATEX if (needed and latex_available) else ConversionMode.SIMPLE
-            auto_note = f" (auto-detected: {reason or 'no math/callouts found'})"
-    else:
-        auto_note = ""
+        try:
+            actual_mode = convert_auto(
+                params.markdown,
+                output_path,
+                margin=f"{params.margin_mm}mm",
+                theme="light",
+            )
+        except Exception as exc:
+            return f"Error: automatic conversion failed.\\n{exc}"
+        return f"Saved validated PDF to {output_path} (mode: {actual_mode}, auto-selected)."
+
+    auto_note = ""
 
     if mode == ConversionMode.SIDEBAR:
         if not (tools.get("pandoc") and tools.get("chromium")):

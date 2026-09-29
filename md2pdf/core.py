@@ -12,6 +12,69 @@ import shutil
 import subprocess
 import tempfile
 
+
+
+# ---------------------------------------------------------------------------
+# Process and artifact validation
+# ---------------------------------------------------------------------------
+DEFAULT_PROCESS_TIMEOUT = 120
+
+
+def _run_process(args, **kwargs):
+    """Run an external tool with a bounded timeout and normalized failures."""
+    kwargs.setdefault("timeout", DEFAULT_PROCESS_TIMEOUT)
+    try:
+        return subprocess.run(args, **kwargs)
+    except FileNotFoundError as exc:
+        command = args[0] if args else "<empty command>"
+        raise RuntimeError(f"Required executable not found: {command}") from exc
+    except subprocess.TimeoutExpired as exc:
+        command = args[0] if args else "<empty command>"
+        raise RuntimeError(
+            f"Command timed out after {kwargs['timeout']} seconds: {command}"
+        ) from exc
+    except OSError as exc:
+        command = args[0] if args else "<empty command>"
+        raise RuntimeError(f"Could not start {command}: {exc}") from exc
+
+
+def validate_pdf_output(path: str) -> None:
+    """Raise RuntimeError unless path looks like a complete, non-empty PDF.
+
+    This is a lightweight integrity check, not a replacement for a full PDF
+    parser. It catches missing, empty, truncated, and obviously wrong outputs.
+    """
+    if not os.path.isfile(path):
+        raise RuntimeError(f"Renderer did not create an output file: {path}")
+    if os.path.getsize(path) < 16:
+        raise RuntimeError(f"Renderer created an empty or undersized output: {path}")
+    try:
+        with open(path, "rb") as stream:
+            header = stream.read(8)
+            stream.seek(max(0, os.path.getsize(path) - 4096))
+            tail = stream.read()
+            stream.seek(0)
+            has_page_object = False
+            overlap = b""
+            while True:
+                chunk = stream.read(1024 * 1024)
+                if not chunk:
+                    break
+                scan = overlap + chunk
+                if re.search(rb"/Type\s*/Page(?:\s|/|>)", scan):
+                    has_page_object = True
+                    break
+                overlap = scan[-32:]
+    except OSError as exc:
+        raise RuntimeError(f"Could not read generated PDF: {exc}") from exc
+    if not header.startswith(b"%PDF-"):
+        raise RuntimeError(f"Output does not have a PDF signature: {path}")
+    if b"%%EOF" not in tail:
+        raise RuntimeError(f"PDF appears truncated (missing %%EOF): {path}")
+    if not has_page_object:
+        raise RuntimeError(f"PDF contains no detectable page objects: {path}")
+
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -117,7 +180,7 @@ def probe_latex_template():
                 "-V", "margin=0.5in",
                 "-o", pdf_file,
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            result = _run_process(cmd, capture_output=True, text=True, timeout=30)
             if result.returncode != 0:
                 return False, result.stderr.strip()[-800:]
             return True, None
@@ -328,7 +391,7 @@ def convert_simple(md_content: str, save_path: str, margin: str = "0.5in") -> No
         with open(md_file, "w", encoding="utf-8") as f:
             f.write(cleaned)
 
-        result = subprocess.run(
+        result = _run_process(
             ["pandoc", md_file, "-o", html_file, "--standalone", "--webtex"],
             capture_output=True, text=True,
         )
@@ -341,7 +404,7 @@ def convert_simple(md_content: str, save_path: str, margin: str = "0.5in") -> No
         with open(html_file, "w", encoding="utf-8") as f:
             f.write(html)
 
-        result = subprocess.run(
+        result = _run_process(
             [
                 "wkhtmltopdf", "--encoding", "utf-8",
                 "--enable-local-file-access",
@@ -352,7 +415,8 @@ def convert_simple(md_content: str, save_path: str, margin: str = "0.5in") -> No
             capture_output=True, text=True,
         )
         if result.returncode != 0:
-            raise RuntimeError(f"wkhtmltopdf failed:\n{result.stderr}")
+            raise RuntimeError(f"wkhtmltopdf failed:\n{result.stderr.strip()}")
+        validate_pdf_output(save_path)
 
 
 def convert_latex(md_content: str, save_path: str, margin: str = "0.5in") -> None:
@@ -384,9 +448,10 @@ def convert_latex(md_content: str, save_path: str, margin: str = "0.5in") -> Non
                 "-o", save_path,
             ]
         )
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = _run_process(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            raise RuntimeError(f"pandoc/pdflatex failed:\n{result.stderr}")
+            raise RuntimeError(f"pandoc/pdflatex failed:\n{result.stderr.strip()}")
+        validate_pdf_output(save_path)
 
 
 # ---------------------------------------------------------------------------
@@ -880,7 +945,7 @@ def convert_sidebar(md_content: str, save_path: str, margin: str = "14mm", theme
             f.write(cleaned)
 
         # Render markdown to HTML fragment via pandoc
-        res = subprocess.run([
+        res = _run_process([
             "pandoc", md_file,
             "-f", "markdown+raw_html+pipe_tables",
             "-t", "html5",
@@ -920,35 +985,66 @@ def convert_sidebar(md_content: str, save_path: str, margin: str = "14mm", theme
             final_html_file,
         ]
 
-        p_res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        if not os.path.isfile(save_path) or os.path.getsize(save_path) == 0:
-            raise RuntimeError(f"Chromium PDF generation failed:\n{p_res.stderr}")
+        p_res = _run_process(cmd, capture_output=True, text=True, timeout=60)
+        if p_res.returncode != 0:
+            raise RuntimeError(f"Chromium PDF generation failed:\n{p_res.stderr.strip()}")
+        validate_pdf_output(save_path)
 
 
 def convert_auto(md_content: str, save_path: str, margin: str = "0.5in", theme: str = "light"):
-    """Pick Sidebar/Chromium mode if the content needs it (Mermaid/GFM alerts/math)
-    and Chromium is available. Otherwise falls back to LaTeX mode, then Simple mode."""
+    """Select a renderer and fall back only when a backend is available.
+
+    Returns the renderer that actually produced a validated PDF. Failed
+    attempts are retained in the final error instead of being silently lost.
+    """
     tools = check_tools()
-    needed_sidebar, _reason_sidebar = detect_sidebar_needed(md_content)
+    needed_sidebar, reason_sidebar = detect_sidebar_needed(md_content)
+    needed_latex, reason_latex = detect_latex_needed(md_content)
+    attempts = []
 
-    if needed_sidebar and tools.get("chromium") and tools.get("pandoc"):
+    candidates = []
+    if needed_sidebar:
+        candidates.append(("sidebar", bool(tools.get("pandoc") and tools.get("chromium"))))
+    if needed_latex:
+        candidates.append(("latex", bool(tools.get("pandoc") and tools.get("pdflatex"))))
+    candidates.append(("simple", bool(tools.get("pandoc") and tools.get("wkhtmltopdf"))))
+
+    # Keep the candidate order stable while avoiding duplicate backends.
+    seen = set()
+    for backend, available in candidates:
+        if backend in seen:
+            continue
+        seen.add(backend)
+        if not available:
+            attempts.append(f"{backend}: skipped (required tools unavailable)")
+            continue
         try:
-            convert_sidebar(md_content, save_path, margin=margin, theme=theme)
-            return "sidebar"
-        except Exception:
-            pass
+            if backend == "sidebar":
+                convert_sidebar(md_content, save_path, margin=margin, theme=theme)
+            elif backend == "latex":
+                convert_latex(md_content, save_path, margin=margin)
+            else:
+                convert_simple(md_content, save_path, margin=margin)
+            validate_pdf_output(save_path)
+            return backend
+        except Exception as exc:
+            attempts.append(f"{backend}: {type(exc).__name__}: {exc}")
+            try:
+                if os.path.exists(save_path):
+                    os.remove(save_path)
+            except OSError:
+                pass
 
-    needed_latex, _reason_latex = detect_latex_needed(md_content)
-    latex_available = tools.get("pandoc") and tools.get("pdflatex")
-    if needed_latex and latex_available:
-        try:
-            convert_latex(md_content, save_path, margin)
-            return "latex"
-        except Exception:
-            pass
-
-    convert_simple(md_content, save_path, margin)
-    return "simple"
+    context = []
+    if reason_sidebar:
+        context.append(f"sidebar feature detected: {reason_sidebar}")
+    if reason_latex:
+        context.append(f"LaTeX feature detected: {reason_latex}")
+    details = "\n".join(attempts) if attempts else "No renderer was eligible."
+    prefix = "; ".join(context)
+    if prefix:
+        prefix += "\n"
+    raise RuntimeError(f"No renderer produced a valid PDF. {prefix}Attempts:\n{details}")
 
 
 
