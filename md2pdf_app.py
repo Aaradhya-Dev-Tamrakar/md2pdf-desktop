@@ -9,8 +9,10 @@ identical vector PDF outputs.
 """
 
 import os
+import queue
 import subprocess
 import sys
+import threading
 import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
@@ -59,6 +61,9 @@ class MD2PDFStudioApp:
 
         self.md_path = None
         self.last_output_pdf = None
+        self._conversion_in_progress = False
+        self._conversion_queue = queue.Queue()
+        self._conversion_after_id = None
 
         self._check_deps()
         self._configure_styles()
@@ -537,14 +542,12 @@ class MD2PDFStudioApp:
     def open_output_folder(self):
         if self.last_output_pdf and os.path.exists(self.last_output_pdf):
             folder = os.path.dirname(os.path.abspath(self.last_output_pdf))
-            if sys.platform == "win32":
-                os.startfile(folder)
-            elif sys.platform == "darwin":
-                subprocess.run(["open", folder])
-            else:
-                subprocess.run(["xdg-open", folder])
+            self._open_path(folder)
 
     def convert(self):
+        if self._conversion_in_progress:
+            return
+
         mode = self.mode_var.get()
 
         if mode in ("sidebar_dark", "sidebar_light") and not self.sidebar_ok:
@@ -583,45 +586,102 @@ class MD2PDFStudioApp:
         if not save_path:
             return
 
-        self.status.config(text="⏳ Converting document to high-fidelity PDF...", fg=THEME["accent_amber"])
-        self.convert_btn.config(state="disabled")
-        self.root.update_idletasks()
+        # Snapshot all Tk state before handing work to the background thread.
+        theme = "dark" if mode == "sidebar_dark" else "light"
+        open_pdf_after = bool(self.open_pdf_var.get())
+        renderer = {
+            "sidebar_dark": "Sidebar Dark",
+            "sidebar_light": "Sidebar Light",
+            "latex": "LaTeX",
+            "simple": "Simple",
+        }[mode]
 
+        self._conversion_in_progress = True
+        self.convert_btn.config(state="disabled")
+        self.status.config(
+            text=f"⏳ Converting with {renderer}...",
+            fg=THEME["accent_amber"],
+        )
+
+        worker = threading.Thread(
+            target=self._convert_worker,
+            args=(md_content, save_path, margin, mode, theme, open_pdf_after),
+            daemon=True,
+            name="md2pdf-conversion",
+        )
+        worker.start()
+        self._conversion_after_id = self.root.after(100, self._poll_conversion)
+
+    def _convert_worker(self, md_content, save_path, margin, mode, theme, open_pdf_after):
         start_time = time.time()
         try:
-            if mode == "sidebar_dark":
-                convert_sidebar(md_content, save_path, margin=margin, theme="dark")
-            elif mode == "sidebar_light":
-                convert_sidebar(md_content, save_path, margin=margin, theme="light")
+            if mode in ("sidebar_dark", "sidebar_light"):
+                convert_sidebar(md_content, save_path, margin=margin, theme=theme)
             elif mode == "latex":
                 convert_latex(md_content, save_path, margin=margin)
             else:
                 convert_simple(md_content, save_path, margin=margin)
 
-            elapsed = time.time() - start_time
             file_size_kb = os.path.getsize(save_path) / 1024
-            size_str = f"{file_size_kb:.1f} KB" if file_size_kb < 1024 else f"{file_size_kb/1024:.2f} MB"
+            elapsed = time.time() - start_time
+            self._conversion_queue.put({
+                "ok": True,
+                "save_path": save_path,
+                "elapsed": elapsed,
+                "file_size_kb": file_size_kb,
+                "open_pdf": open_pdf_after,
+            })
+        except Exception as exc:
+            self._conversion_queue.put({
+                "ok": False,
+                "error": str(exc),
+            })
 
-            self.last_output_pdf = save_path
-            self.open_folder_btn.config(state="normal")
+    def _poll_conversion(self):
+        try:
+            result = self._conversion_queue.get_nowait()
+        except queue.Empty:
+            self._conversion_after_id = self.root.after(100, self._poll_conversion)
+            return
+
+        self._conversion_after_id = None
+        self._finish_conversion(result)
+
+    def _finish_conversion(self, result):
+        self._conversion_in_progress = False
+        self.convert_btn.config(state="normal")
+
+        if not result["ok"]:
+            error = result["error"]
             self.status.config(
-                text=f"✅ Exported in {elapsed:.1f}s: {os.path.basename(save_path)} ({size_str})",
-                fg=THEME["accent_emerald"],
+                text=f"❌ Export failed: {error[:100]}",
+                fg=THEME["accent_rose"],
             )
+            messagebox.showerror("Export Failed", error)
+            return
 
-            if self.open_pdf_var.get():
-                if sys.platform == "win32":
-                    os.startfile(save_path)
-                elif sys.platform == "darwin":
-                    subprocess.run(["open", save_path])
-                else:
-                    subprocess.run(["xdg-open", save_path])
+        save_path = result["save_path"]
+        elapsed = result["elapsed"]
+        file_size_kb = result["file_size_kb"]
+        size_str = f"{file_size_kb:.1f} KB" if file_size_kb < 1024 else f"{file_size_kb/1024:.2f} MB"
 
-        except Exception as e:
-            self.status.config(text=f"❌ Export failed: {str(e)[:100]}", fg=THEME["accent_rose"])
-            messagebox.showerror("Export Failed", str(e))
-        finally:
-            self.convert_btn.config(state="normal")
+        self.last_output_pdf = save_path
+        self.open_folder_btn.config(state="normal")
+        self.status.config(
+            text=f"✅ Exported in {elapsed:.1f}s: {os.path.basename(save_path)} ({size_str})",
+            fg=THEME["accent_emerald"],
+        )
+
+        if result["open_pdf"]:
+            self._open_path(save_path)
+
+    def _open_path(self, path):
+        if sys.platform == "win32":
+            os.startfile(path)
+        elif sys.platform == "darwin":
+            subprocess.run(["open", path], check=False)
+        else:
+            subprocess.run(["xdg-open", path], check=False)
 
 
 def main():

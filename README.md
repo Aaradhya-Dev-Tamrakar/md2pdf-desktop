@@ -15,7 +15,7 @@ All surfaces share conversion functions in [`md2pdf/core.py`](./md2pdf/core.py).
 ## 🚀 Conversion Engines
 
 ### 1. 🌟 Sidebar Mode (Default & Recommended)
-**Pipeline:** `pandoc` (MD → HTML5 AST) → Injected KaTeX + Mermaid.js → Headless Chromium (Google Chrome / Microsoft Edge) → Vector PDF.
+**Pipeline:** `pandoc` (MD → HTML5 AST) → locally provisioned KaTeX + Mermaid assets → Headless Chromium (Google Chrome / Microsoft Edge) → Vector PDF.
 
 - **Visual Match**: Renders Markdown with visual fidelity matching the modern IDE Markdown preview sidebar (Google Antigravity, VS Code, GitHub).
 - **Mermaid Vector Diagrams**: Renders ```` ```mermaid ```` flowcharts, sequence diagrams, and state charts directly into vector SVGs.
@@ -25,7 +25,7 @@ All surfaces share conversion functions in [`md2pdf/core.py`](./md2pdf/core.py).
   - **Light Mode (`theme="light"`, Default)**: Pure white canvas (`#ffffff`), dark slate typography (`#111827`), blue question accents (`#1d4ed8`), violet algorithm headers (`#7c3aed`), and light-themed diagram nodes. Ideal for physical paper printing.
   - **Dark Mode (`theme="dark"`)**: Deep zinc palette (`#18181b`) matching dark IDE preview panels.
 - **Print Pagination**: Uses Chromium's print layout and page CSS. Complex equations, tables, code, and diagrams should be checked in the generated PDF because browser pagination can still split content.
-- **Zero Heavy TeX Overhead**: Uses the Google Chrome or Microsoft Edge executable already installed on your system.
+- **Deterministic Browser Assets**: KaTeX and Mermaid are pinned to exact package versions, downloaded from npm package tarballs with SHA-512 verification, then cached locally. Subsequent offline conversions do not contact a CDN.
 
 ### 2. 📐 LaTeX Formal Mode
 **Pipeline:** `pandoc` (MD → LaTeX, via `md2pdf/templates/styled.latex`) → `pdflatex`.
@@ -42,11 +42,38 @@ All surfaces share conversion functions in [`md2pdf/core.py`](./md2pdf/core.py).
 
 ### 4. 🧠 Auto Mode
 Content-aware backend selector. Inspects Markdown content:
-- If Mermaid diagrams or GFM alerts are detected $\to$ routes to **Sidebar** mode.
+- If Mermaid diagrams or GFM alerts are detected $\to$ requires **Sidebar** mode; Auto reports the specialized renderer failure rather than silently degrading the document to another backend.
 - If complex LaTeX math or callout divs are detected $\to$ routes to **Sidebar** (if Chromium present) or **LaTeX** (if `pdflatex` present).
 - Otherwise falls back to **Simple** mode.
+- Renderer output is published atomically, so a failed conversion does not replace an existing valid PDF.
 
 ---
+
+## 🖥️ Command-line interface
+
+Install the Python package from a checkout (Python 3.10+):
+
+```powershell
+python -m pip install .
+```
+
+Then convert a document:
+
+```powershell
+md2pdf notes.md --mode auto --output notes.pdf
+md2pdf notes.md --mode sidebar --theme dark --margin 14mm
+```
+
+The CLI reports the selected renderer and returns a non-zero exit code for invalid input or conversion failures. Pandoc and the chosen renderer executable remain system dependencies; installing the Python package does not install those tools. MCP server dependencies remain in `requirements.txt`.
+
+Provision or verify the Sidebar browser assets explicitly:
+
+```powershell
+python -m md2pdf.web_assets
+python -m md2pdf.web_assets --offline
+```
+
+Set `MD2PDF_OFFLINE=1` to make Sidebar conversion cache-only. The cache is stored outside the Python installation and is re-hash-verified from its manifest.
 
 ## 🎨 Desktop Studio GUI (`md2pdf_app.py`)
 
@@ -61,6 +88,7 @@ python md2pdf_app.py
 - **Dynamic Syntax Auto-Detector**: Automatically analyzes editor text and informs you why a specific engine was chosen.
 - **Live Document Stats**: Tracks line count, word count, character count, and file size in real time.
 - **Quick Action Bar**: `📂 Open .md File`, `📋 Paste Clipboard`, `🧹 Clear`, and active file badge.
+- **Responsive Conversion**: PDF rendering runs in a background worker so the Tkinter editor remains interactive while conversion is in progress.
 - **Export Presets & Automation**: Quick margin dropdown (`10mm`, `14mm`, `20mm`, `0.5in`), auto-open PDF on completion, and `📁 Show in Folder` shortcut.
 
 ---
@@ -108,6 +136,7 @@ python mcp_server/server.py
   ```
 - **Chromium** (for Sidebar mode — either Google Chrome or Microsoft Edge):
   - Pre-installed on Windows (`msedge.exe` or `chrome.exe`).
+  - The first Sidebar conversion provisions pinned browser assets from npm; later runs reuse the local cache.
 - **Optional Tools**:
   - `pdflatex` (TeX Live or MiKTeX) for LaTeX Formal mode.
   - `wkhtmltopdf` for Simple mode.
@@ -131,8 +160,11 @@ The repository includes a dedicated sync engine enforcing pre-commit secret scan
 # Safe pull only
 .\sync.ps1 -PullOnly
 
-# Dry run preview
+# Dry run preview (read-only; does not stage or reset files)
 .\sync.ps1 -WhatIf
+
+# Explicitly repair a missing/mismatched origin remote
+.\sync.ps1 -RepairRemote
 ```
 
 ---
@@ -157,8 +189,8 @@ Run the standard-library regression suite:
 python -m unittest discover -s tests -v
 ```
 
-The tests cover PDF output integrity checks and automatic-renderer fallback behavior. They do not replace end-to-end tests against real Pandoc, Chromium, LaTeX, and wkhtmltopdf installations.
+The tests cover PDF output integrity checks, automatic-renderer fallback behavior, Markdown normalization, package installation, and GUI worker behavior. A separate integration job invokes the real Pandoc + wkhtmltopdf pipeline.
 
 ### Reproducibility note
 
-Sidebar mode currently loads KaTeX and Mermaid resources from external CDN URLs. It therefore requires network access for those resources and is not yet fully self-contained or guaranteed to render identically offline. See [the stabilization notes](./docs/STABILIZATION_NOTES.md) for the current validation contract and remaining risks.
+Sidebar mode no longer loads KaTeX or Mermaid from a CDN at render time. The exact KaTeX 0.16.11 and Mermaid 10.9.3 npm package tarballs are SHA-512 verified before the required browser assets are extracted into a local cache. Set `MD2PDF_OFFLINE=1` to forbid network provisioning and require an existing verified cache. Browser, operating-system, and font rendering differences can still affect pixel-level output; the project therefore validates artifact integrity and exercises the real Chromium path in CI rather than claiming byte-for-byte PDF identity.

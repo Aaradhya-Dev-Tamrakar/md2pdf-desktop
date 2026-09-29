@@ -11,6 +11,10 @@ import re
 import shutil
 import subprocess
 import tempfile
+from contextlib import contextmanager
+from pathlib import Path
+
+from .web_assets import ensure_web_assets
 
 
 
@@ -75,12 +79,85 @@ def validate_pdf_output(path: str) -> None:
         raise RuntimeError(f"PDF contains no detectable page objects: {path}")
 
 
+@contextmanager
+def _atomic_output_path(save_path: str):
+    """Yield a temporary PDF path and publish it atomically after validation.
+
+    Rendering into a sibling temporary directory prevents a failed renderer
+    from truncating or replacing an existing valid PDF at save_path.
+    """
+    final_path = os.path.abspath(save_path)
+    parent = os.path.dirname(final_path) or os.getcwd()
+    os.makedirs(parent, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".md2pdf-", dir=parent) as tmp:
+        temporary_path = os.path.join(tmp, os.path.basename(final_path))
+        yield temporary_path
+        validate_pdf_output(temporary_path)
+        os.replace(temporary_path, final_path)
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 LATEX_TEMPLATE = os.path.join(PACKAGE_DIR, "templates", "styled.latex")
 LUA_FILTER = os.path.join(PACKAGE_DIR, "templates", "callout-boxes.lua")
+
+# ---------------------------------------------------------------------------
+# Context-aware Markdown protection
+# ---------------------------------------------------------------------------
+def _protect_fenced_blocks(text: str):
+    """Protect Markdown fenced blocks from document-wide text normalization.
+
+    Tracks the opening fence character and length, including valid unclosed
+    fences that continue to end-of-file. Mermaid blocks should be transformed
+    before this helper is called.
+    """
+    lines = text.splitlines(keepends=True)
+    protected = []
+    output = []
+    current = []
+    opening_char = None
+    opening_length = 0
+
+    for line in lines:
+        match = re.match(r"^[ \t]{0,3}(`{3,}|~{3,})(.*)$", line)
+        if opening_char is None:
+            if match:
+                marker = match.group(1)
+                opening_char = marker[0]
+                opening_length = len(marker)
+                current = [line]
+            else:
+                output.append(line)
+            continue
+
+        current.append(line)
+        if match:
+            marker = match.group(1)
+            info = match.group(2)
+            if (
+                marker[0] == opening_char
+                and len(marker) >= opening_length
+                and not info.strip()
+            ):
+                index = len(protected)
+                protected.append("".join(current))
+                output.append(f"\x00MD2PDF_BLOCK_{index}\x00")
+                current = []
+                opening_char = None
+                opening_length = 0
+
+    if current:
+        index = len(protected)
+        protected.append("".join(current))
+        output.append(f"\x00MD2PDF_BLOCK_{index}\x00")
+    return "".join(output), protected
+
+
+def _restore_fenced_blocks(text: str, blocks):
+    for index, block in enumerate(blocks):
+        text = text.replace(f"\x00MD2PDF_BLOCK_{index}\x00", block)
+    return text
 
 # ---------------------------------------------------------------------------
 # Content-based LaTeX-need detection
@@ -229,104 +306,108 @@ def ascii_grid_to_markdown(block: str) -> str:
 
 
 def clean_markdown_for_pdf(md_content: str, mode: str = "auto") -> str:
-    """
-    Sanitizes and normalizes markdown for high-quality, bug-free PDF rendering:
-    1. Automatically transforms ASCII grid tables (+---+ borders) into native Markdown tables.
-    2. Replaces Unicode emojis that crash pdflatex or render as missing squares.
-    3. Converts Unicode box-drawing characters and geometric symbols into clean ASCII.
-    4. Formats Mermaid graph blocks into readable callout diagram blocks with sanitized characters.
-    5. Converts isolated Unicode math/logic symbols (¬, ∨, ∧, ∞, ε, θ, ·) into LaTeX math mode.
-    6. Normalizes escaped LaTeX delimiters (\\( -> $, \\[ -> $$).
-    7. Strips corrupted encoding artifacts (e.g. \\ufffd).
+    """Normalize Markdown while preserving ordinary fenced code literally.
+
+    Mermaid fences and explicitly marked ASCII tables are transformed; other
+    fenced blocks are protected from document-wide Unicode replacements.
     """
     if not md_content:
         return ""
 
-    text = md_content.replace('\ufffd', '-')
+    text = md_content
+    fence = chr(96)
 
-    # Convert ASCII grid code blocks into native Markdown pipe tables
+    # Mermaid is a semantic diagram block, so transform it before ordinary
+    # fenced-code protection. Symbols inside Mermaid are normalized locally.
+    def _replace_mermaid(match):
+        diagram_code = match.group(1).strip()
+        diagram_code = (
+            diagram_code.replace("∨", " OR ")
+            .replace("∧", " AND ")
+            .replace("¬", "~")
+            .replace("θ", "theta")
+            .replace("ε", "eps")
+            .replace("∞", "inf")
+        )
+        return (
+            "::: {.callout}\n"
+            "**Diagram (Flowchart):**\n"
+            + fence * 3 + "\n"
+            + diagram_code
+            + "\n" + fence * 3 + "\n:::"
+        )
+
+    mermaid_pattern = fence * 3 + r"mermaid\s*\n(.*?)\n" + fence * 3
+    text = re.sub(mermaid_pattern, _replace_mermaid, text, flags=re.DOTALL)
+
+    # Convert explicitly labelled text/ascii grid tables before protecting
+    # code, since these fences are intentionally converted into Markdown tables.
+    # code fences remain code and are restored unchanged below.
     def _replace_ascii_tables(match):
         code_body = match.group(1).strip()
         lines = [l.strip() for l in code_body.splitlines() if l.strip()]
         if (
             lines
-            and lines[0].startswith('+')
-            and lines[-1].startswith('+')
-            and all(l.startswith(('+', '|')) for l in lines)
+            and lines[0].startswith("+")
+            and lines[-1].startswith("+")
+            and all(l.startswith(("+", "|")) for l in lines)
         ):
             converted = ascii_grid_to_markdown(code_body)
             if converted != code_body:
                 return converted
         return match.group(0)
 
-    text = re.sub(
-        r'```(?:text|ascii)?\s*\n(\+[-+=|]+\+\n.*?\n\+[-+=|]+\+)\s*\n```',
-        _replace_ascii_tables,
-        text,
-        flags=re.DOTALL,
+    labelled_pattern = (
+        fence * 3 + r"(?:text|ascii)\s*\n"
+        r"(\+[-+=|]+\+\n.*?\n\+[-+=|]+\+)\s*\n"
+        + fence * 3
     )
+    text = re.sub(labelled_pattern, _replace_ascii_tables, text, flags=re.DOTALL)
 
-    # Convert naked ASCII grid tables (not in code blocks)
+    # Protect all remaining fenced blocks before document-wide normalization.
+    text, protected_blocks = _protect_fenced_blocks(text)
+    text = text.replace("\ufffd", "-")
+
+    # Convert naked ASCII grid tables, which are unambiguously table-shaped.
     def _replace_naked_ascii_tables(match):
         table_text = match.group(1).strip()
         converted = ascii_grid_to_markdown(table_text)
         return "\n\n" + converted + "\n\n"
 
     text = re.sub(
-        r'(?:^|\n)(\+[-+=|]+\+\n(?:[+|].*?\n)+\+[-+=|]+\+)(?=\n|$)',
+        r"(?:^|\n)(\+[-+=|]+\+\n(?:[+|].*?\n)+\+[-+=|]+\+)(?=\n|$)",
         _replace_naked_ascii_tables,
         text,
     )
 
-    # Common unicode and emoji normalization
     replacements = {
-        '📂': '[Folder]', '📁': '[Folder]', '🎯': '[Target]', '🎬': '[Video]',
-        '✅': '[OK]', '✔': '[OK]', '❌': '[X]', '⏳': '[Pending]', '🎉': '',
-        '⚠️': '[Warning]', '•': '-', '—': '--', '–': '-',
-        '“': '"', '”': '"', '‘': "'", '’': "'", '°': ' deg',
-        '▲': '^', '▼': 'v', '►': '>', '◄': '<',
-        '│': '|', '─': '-', '┌': '+', '┐': '+', '└': '+', '┘': '+',
-        '├': '+', '┤': '+', '┬': '+', '┴': '+', '┼': '+',
-        '□': '[ ]', '⌊': '[', '⌋': ']', '↓': 'v', '↑': '^',
+        "📂": "[Folder]", "📁": "[Folder]", "🎯": "[Target]", "🎬": "[Video]",
+        "✅": "[OK]", "✔": "[OK]", "❌": "[X]", "⏳": "[Pending]", "🎉": "",
+        "⚠️": "[Warning]", "•": "-", "—": "--", "–": "-",
+        "“": '"', "”": '"', "‘": "'", "’": "'", "°": " deg",
+        "▲": "^", "▼": "v", "►": ">", "◄": "<",
+        "│": "|", "─": "-", "┌": "+", "┐": "+", "└": "+", "┘": "+",
+        "├": "+", "┤": "+", "┬": "+", "┴": "+", "┼": "+",
+        "□": "[ ]", "⌊": "[", "⌋": "]", "↓": "v", "↑": "^",
     }
-    for k, v in replacements.items():
-        text = text.replace(k, v)
+    for key, value in replacements.items():
+        text = text.replace(key, value)
 
-    # Strip remaining 4-byte SMP emojis for LaTeX safety
-    text = re.sub(r'[\U00010000-\U0010ffff]', '', text)
+    text = re.sub(r"[\U00010000-\U0010ffff]", "", text)
+    text = text.replace("∨", r" $\lor$ ")
+    text = text.replace("∧", r" $\land$ ")
+    text = text.replace("¬", r" $\neg$ ")
+    text = text.replace("∞", r" $\infty$ ")
+    text = text.replace("ε", r" $\varepsilon$ ")
+    text = text.replace("θ", r" $\theta$ ")
+    text = text.replace("·", r" $\cdot$ ")
 
-    # Convert Mermaid code fences to clean diagram callouts
-    def _replace_mermaid(match):
-        diagram_code = match.group(1).strip()
-        # Clean logic & math symbols inside mermaid code block to ascii
-        diagram_code = (
-            diagram_code.replace('∨', ' OR ')
-            .replace('∧', ' AND ')
-            .replace('¬', '~')
-            .replace('θ', 'theta')
-            .replace('ε', 'eps')
-            .replace('∞', 'inf')
-        )
-        return f"::: {{.callout}}\n**Diagram (Flowchart):**\n```\n{diagram_code}\n```\n:::"
+    text = re.sub(r"\\\\\(", "$", text)
+    text = re.sub(r"\\\\\)", "$", text)
+    text = re.sub(r"\\\\\[", "$$", text)
+    text = re.sub(r"\\\\\]", "$$", text)
 
-    text = re.sub(r'```mermaid\s*\n(.*?)\n```', _replace_mermaid, text, flags=re.DOTALL)
-
-    # Clean logic and math symbols outside mermaid
-    text = text.replace('∨', r' $\lor$ ')
-    text = text.replace('∧', r' $\land$ ')
-    text = text.replace('¬', r' $\neg$ ')
-    text = text.replace('∞', r' $\infty$ ')
-    text = text.replace('ε', r' $\varepsilon$ ')
-    text = text.replace('θ', r' $\theta$ ')
-    text = text.replace('·', r' $\cdot$ ')
-
-    # Normalize escaped LaTeX brackets from LLM outputs
-    text = re.sub(r'\\\\\(', '$', text)
-    text = re.sub(r'\\\\\)', '$', text)
-    text = re.sub(r'\\\\\[', '$$', text)
-    text = re.sub(r'\\\\\]', '$$', text)
-
-    return text
+    return _restore_fenced_blocks(text, protected_blocks)
 
 
 DEFAULT_CSS = """
@@ -384,39 +465,39 @@ def convert_simple(md_content: str, save_path: str, margin: str = "0.5in") -> No
     """
     cleaned = clean_markdown_for_pdf(md_content, mode="simple")
     margin_str = _normalize_margin(margin)
-    with tempfile.TemporaryDirectory() as tmp:
-        md_file = os.path.join(tmp, "doc.md")
-        html_file = os.path.join(tmp, "doc.html")
+    with _atomic_output_path(save_path) as temporary_output:
+        with tempfile.TemporaryDirectory() as tmp:
+            md_file = os.path.join(tmp, "doc.md")
+            html_file = os.path.join(tmp, "doc.html")
 
-        with open(md_file, "w", encoding="utf-8") as f:
-            f.write(cleaned)
+            with open(md_file, "w", encoding="utf-8") as f:
+                f.write(cleaned)
 
-        result = _run_process(
-            ["pandoc", md_file, "-o", html_file, "--standalone", "--webtex"],
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"pandoc failed:\n{result.stderr}")
+            result = _run_process(
+                ["pandoc", md_file, "-o", html_file, "--standalone", "--webtex"],
+                capture_output=True, text=True,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"pandoc failed:\n{result.stderr}")
 
-        with open(html_file, "r", encoding="utf-8") as f:
-            html = f.read()
-        html = html.replace("</head>", DEFAULT_CSS + "</head>")
-        with open(html_file, "w", encoding="utf-8") as f:
-            f.write(html)
+            with open(html_file, "r", encoding="utf-8") as f:
+                html = f.read()
+            html = html.replace("</head>", DEFAULT_CSS + "</head>")
+            with open(html_file, "w", encoding="utf-8") as f:
+                f.write(html)
 
-        result = _run_process(
-            [
-                "wkhtmltopdf", "--encoding", "utf-8",
-                "--enable-local-file-access",
-                "--margin-top", margin_str, "--margin-bottom", margin_str,
-                "--margin-left", margin_str, "--margin-right", margin_str,
-                html_file, save_path,
-            ],
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"wkhtmltopdf failed:\n{result.stderr.strip()}")
-        validate_pdf_output(save_path)
+            result = _run_process(
+                [
+                    "wkhtmltopdf", "--encoding", "utf-8",
+                    "--enable-local-file-access",
+                    "--margin-top", margin_str, "--margin-bottom", margin_str,
+                    "--margin-left", margin_str, "--margin-right", margin_str,
+                    html_file, temporary_output,
+                ],
+                capture_output=True, text=True,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"wkhtmltopdf failed:\n{result.stderr.strip()}")
 
 
 def convert_latex(md_content: str, save_path: str, margin: str = "0.5in") -> None:
@@ -432,26 +513,26 @@ def convert_latex(md_content: str, save_path: str, margin: str = "0.5in") -> Non
     cleaned = clean_markdown_for_pdf(md_content, mode="latex")
     margin_str = _normalize_margin(margin)
 
-    with tempfile.TemporaryDirectory() as tmp:
-        md_file = os.path.join(tmp, "doc.md")
-        with open(md_file, "w", encoding="utf-8") as f:
-            f.write(cleaned)
+    with _atomic_output_path(save_path) as temporary_output:
+        with tempfile.TemporaryDirectory() as tmp:
+            md_file = os.path.join(tmp, "doc.md")
+            with open(md_file, "w", encoding="utf-8") as f:
+                f.write(cleaned)
 
-        filter_args = ["--lua-filter", LUA_FILTER] if os.path.isfile(LUA_FILTER) else []
-        cmd = (
-            ["pandoc", md_file]
-            + filter_args
-            + [
-                "--template", LATEX_TEMPLATE,
-                "--pdf-engine", "pdflatex",
-                "-V", f"margin={margin_str}",
-                "-o", save_path,
-            ]
-        )
-        result = _run_process(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(f"pandoc/pdflatex failed:\n{result.stderr.strip()}")
-        validate_pdf_output(save_path)
+            filter_args = ["--lua-filter", LUA_FILTER] if os.path.isfile(LUA_FILTER) else []
+            cmd = (
+                ["pandoc", md_file]
+                + filter_args
+                + [
+                    "--template", LATEX_TEMPLATE,
+                    "--pdf-engine", "pdflatex",
+                    "-V", f"margin={margin_str}",
+                    "-o", temporary_output,
+                ]
+            )
+            result = _run_process(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(f"pandoc/pdflatex failed:\n{result.stderr.strip()}")
 
 
 # ---------------------------------------------------------------------------
@@ -506,19 +587,20 @@ def prepare_mermaid_for_html(md_text: str) -> str:
 
 
 def clean_markdown_for_sidebar(md_content: str) -> str:
-    """Sanitizes and prepares markdown for modern Chromium/KaTeX/Mermaid rendering."""
+    """Prepare Markdown for Chromium while preserving ordinary code blocks."""
     if not md_content:
         return ""
-    text = md_content.replace('\ufffd', '-')
+    text = md_content
     text = transform_gfm_alerts(text)
     text = prepare_mermaid_for_html(text)
+    text, protected_blocks = _protect_fenced_blocks(text)
+    text = text.replace("\ufffd", "-")
 
-    # Normalize escaped brackets from LLMs
-    text = re.sub(r'\\\\\(', '$', text)
-    text = re.sub(r'\\\\\)', '$', text)
-    text = re.sub(r'\\\\\[', '$$', text)
-    text = re.sub(r'\\\\\]', '$$', text)
-    return text
+    text = re.sub(r"\\\\\(", "$", text)
+    text = re.sub(r"\\\\\)", "$", text)
+    text = re.sub(r"\\\\\[", "$$", text)
+    text = re.sub(r"\\\\\]", "$$", text)
+    return _restore_fenced_blocks(text, protected_blocks)
 
 
 SIDEBAR_DARK_CSS = """
@@ -857,10 +939,7 @@ HTML_SIDEBAR_WRAPPER = """<!DOCTYPE html>
 <head>
   <meta charset="utf-8">
   <title>Document</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  {asset_head}
   {css}
 </head>
 <body>
@@ -907,6 +986,26 @@ HTML_SIDEBAR_WRAPPER = """<!DOCTYPE html>
 """
 
 
+def _asset_uri(path: Path) -> str:
+    """Return a local file URI suitable for Chromium."""
+    return path.resolve().as_uri()
+
+
+def build_sidebar_asset_head(asset_dir: Path | None = None) -> str:
+    """Build local KaTeX/Mermaid resource tags without CDN requests."""
+    root = ensure_web_assets(asset_dir=asset_dir)
+    katex_css = _asset_uri(root / "katex.min.css")
+    katex_js = _asset_uri(root / "katex.min.js")
+    auto_render = _asset_uri(root / "contrib" / "auto-render.min.js")
+    mermaid_js = _asset_uri(root / "mermaid.min.js")
+    return (
+        f'<link rel="stylesheet" href="{katex_css}">\n'
+        f'<script defer src="{katex_js}"></script>\n'
+        f'<script defer src="{auto_render}"></script>\n'
+        f'<script defer src="{mermaid_js}"></script>'
+    )
+
+
 def convert_sidebar(md_content: str, save_path: str, margin: str = "14mm", theme: str = "light") -> None:
     """Converts Markdown to PDF using Headless Chromium + KaTeX + Mermaid.js.
     Provides identical visual fidelity to the modern IDE Markdown preview sidebar.
@@ -936,60 +1035,62 @@ def convert_sidebar(md_content: str, save_path: str, margin: str = "14mm", theme
         line_color = "#4b5563"
         border_color = "#374151"
 
-    with tempfile.TemporaryDirectory() as tmp:
-        md_file = os.path.join(tmp, "doc.md")
-        body_html_file = os.path.join(tmp, "body.html")
-        final_html_file = os.path.join(tmp, "final.html")
+    with _atomic_output_path(save_path) as temporary_output:
+        with tempfile.TemporaryDirectory() as tmp:
+            md_file = os.path.join(tmp, "doc.md")
+            body_html_file = os.path.join(tmp, "body.html")
+            final_html_file = os.path.join(tmp, "final.html")
 
-        with open(md_file, "w", encoding="utf-8") as f:
-            f.write(cleaned)
+            with open(md_file, "w", encoding="utf-8") as f:
+                f.write(cleaned)
 
-        # Render markdown to HTML fragment via pandoc
-        res = _run_process([
-            "pandoc", md_file,
-            "-f", "markdown+raw_html+pipe_tables",
-            "-t", "html5",
-            "-o", body_html_file,
-        ], capture_output=True, text=True)
+            # Render markdown to HTML fragment via pandoc
+            res = _run_process([
+                "pandoc", md_file,
+                "-f", "markdown+raw_html+pipe_tables",
+                "-t", "html5",
+                "-o", body_html_file,
+            ], capture_output=True, text=True)
 
-        if res.returncode != 0:
-            raise RuntimeError(f"pandoc failed:\n{res.stderr}")
+            if res.returncode != 0:
+                raise RuntimeError(f"pandoc failed:\n{res.stderr}")
 
-        with open(body_html_file, "r", encoding="utf-8") as f:
-            body_content = f.read()
+            with open(body_html_file, "r", encoding="utf-8") as f:
+                body_content = f.read()
 
-        full_html = HTML_SIDEBAR_WRAPPER.format(
-            css=css_content,
-            body=body_content,
-            mermaid_theme=mermaid_theme,
-            is_dark="true" if is_dark else "false",
-            bg_color=bg_color,
-            box_bkg=box_bkg,
-            text_color=text_color,
-            line_color=line_color,
-            border_color=border_color,
-        )
+            asset_head = build_sidebar_asset_head()
 
-        with open(final_html_file, "w", encoding="utf-8") as f:
-            f.write(full_html)
+            full_html = HTML_SIDEBAR_WRAPPER.format(
+                asset_head=asset_head,
+                css=css_content,
+                body=body_content,
+                mermaid_theme=mermaid_theme,
+                is_dark="true" if is_dark else "false",
+                bg_color=bg_color,
+                box_bkg=box_bkg,
+                text_color=text_color,
+                line_color=line_color,
+                border_color=border_color,
+            )
 
-        cmd = [
-            chrome,
-            "--headless=new",
-            "--disable-gpu",
-            "--allow-running-insecure-content",
-            "--virtual-time-budget=10000",
-            "--run-all-compositor-stages-before-draw",
-            "--no-pdf-header-footer",
-            f"--print-to-pdf={save_path}",
-            final_html_file,
-        ]
+            with open(final_html_file, "w", encoding="utf-8") as f:
+                f.write(full_html)
 
-        p_res = _run_process(cmd, capture_output=True, text=True, timeout=60)
-        if p_res.returncode != 0:
-            raise RuntimeError(f"Chromium PDF generation failed:\n{p_res.stderr.strip()}")
-        validate_pdf_output(save_path)
+            cmd = [
+                chrome,
+                "--headless=new",
+                "--disable-gpu",
+                "--allow-file-access-from-files",
+                "--virtual-time-budget=10000",
+                "--run-all-compositor-stages-before-draw",
+                "--no-pdf-header-footer",
+                f"--print-to-pdf={temporary_output}",
+                final_html_file,
+            ]
 
+            p_res = _run_process(cmd, capture_output=True, text=True, timeout=60)
+            if p_res.returncode != 0:
+                raise RuntimeError(f"Chromium PDF generation failed:\n{p_res.stderr.strip()}")
 
 def convert_auto(md_content: str, save_path: str, margin: str = "0.5in", theme: str = "light"):
     """Select a renderer and fall back only when a backend is available.
@@ -1003,11 +1104,16 @@ def convert_auto(md_content: str, save_path: str, margin: str = "0.5in", theme: 
     attempts = []
 
     candidates = []
+    sidebar_is_required = reason_sidebar in {
+        "Mermaid flowchart/diagram",
+        "GFM alert box (> [!TIP])",
+    }
     if needed_sidebar:
         candidates.append(("sidebar", bool(tools.get("pandoc") and tools.get("chromium"))))
     if needed_latex:
         candidates.append(("latex", bool(tools.get("pandoc") and tools.get("pdflatex"))))
-    candidates.append(("simple", bool(tools.get("pandoc") and tools.get("wkhtmltopdf"))))
+    if not sidebar_is_required:
+        candidates.append(("simple", bool(tools.get("pandoc") and tools.get("wkhtmltopdf"))))
 
     # Keep the candidate order stable while avoiding duplicate backends.
     seen = set()
@@ -1029,11 +1135,9 @@ def convert_auto(md_content: str, save_path: str, margin: str = "0.5in", theme: 
             return backend
         except Exception as exc:
             attempts.append(f"{backend}: {type(exc).__name__}: {exc}")
-            try:
-                if os.path.exists(save_path):
-                    os.remove(save_path)
-            except OSError:
-                pass
+            if sidebar_is_required and backend == "sidebar":
+                attempts.append("auto: specialized Sidebar features cannot be safely downgraded")
+                break
 
     context = []
     if reason_sidebar:

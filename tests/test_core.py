@@ -39,6 +39,50 @@ class PdfValidationTests(unittest.TestCase):
                 core.validate_pdf_output(os.path.join(tmp, "missing.pdf"))
 
 
+class AtomicOutputTests(unittest.TestCase):
+    def test_failed_simple_render_does_not_replace_existing_pdf(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = os.path.join(tmp, "result.pdf")
+            with open(output, "wb") as stream:
+                stream.write(MINIMAL_PDF)
+
+            def fake_process(args, **_kwargs):
+                if args[0] == "pandoc":
+                    with open(args[3], "w", encoding="utf-8") as stream:
+                        stream.write("<html><head></head><body>ok</body></html>")
+                return type("Result", (), {"returncode": 0, "stderr": ""})()
+
+            with mock.patch.object(core, "_run_process", side_effect=fake_process):
+                with self.assertRaisesRegex(RuntimeError, "did not create"):
+                    core.convert_simple("hello", output)
+
+            with open(output, "rb") as stream:
+                self.assertEqual(stream.read(), MINIMAL_PDF)
+
+    def test_successful_atomic_publish_replaces_existing_pdf(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = os.path.join(tmp, "result.pdf")
+            old_pdf = b"%PDF-1.4\n1 0 obj << /Type /Page >> endobj\n%%EOF\n"
+            new_pdf = b"%PDF-1.4\n2 0 obj << /Type /Page >> endobj\n%%EOF\n"
+            with open(output, "wb") as stream:
+                stream.write(old_pdf)
+
+            def fake_process(args, **_kwargs):
+                if args[0] == "pandoc":
+                    with open(args[3], "w", encoding="utf-8") as stream:
+                        stream.write("<html><head></head><body>ok</body></html>")
+                else:
+                    with open(args[-1], "wb") as stream:
+                        stream.write(new_pdf)
+                return type("Result", (), {"returncode": 0, "stderr": ""})()
+
+            with mock.patch.object(core, "_run_process", side_effect=fake_process):
+                core.convert_simple("hello", output)
+
+            with open(output, "rb") as stream:
+                self.assertEqual(stream.read(), new_pdf)
+
+
 class AutoOrchestrationTests(unittest.TestCase):
     def test_falls_back_and_returns_actual_backend(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -53,7 +97,7 @@ class AutoOrchestrationTests(unittest.TestCase):
                     "pandoc": True, "chromium": True,
                     "pdflatex": True, "wkhtmltopdf": True,
                 }),
-                mock.patch.object(core, "detect_sidebar_needed", return_value=(True, "Mermaid")),
+                mock.patch.object(core, "detect_sidebar_needed", return_value=(True, "math notation")),
                 mock.patch.object(core, "detect_latex_needed", return_value=(False, None)),
                 mock.patch.object(core, "convert_sidebar", side_effect=RuntimeError("renderer failed")),
                 mock.patch.object(core, "convert_simple", side_effect=write_pdf),
@@ -62,6 +106,50 @@ class AutoOrchestrationTests(unittest.TestCase):
 
             self.assertEqual(backend, "simple")
             core.validate_pdf_output(output)
+
+    def test_does_not_downgrade_mermaid_to_simple(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = os.path.join(tmp, "existing.pdf")
+            with open(output, "wb") as stream:
+                stream.write(MINIMAL_PDF)
+
+            with (
+                mock.patch.object(core, "check_tools", return_value={
+                    "pandoc": True, "chromium": True,
+                    "pdflatex": True, "wkhtmltopdf": True,
+                }),
+                mock.patch.object(core, "detect_sidebar_needed", return_value=(True, "Mermaid flowchart/diagram")),
+                mock.patch.object(core, "detect_latex_needed", return_value=(False, None)),
+                mock.patch.object(core, "convert_sidebar", side_effect=RuntimeError("browser failed")),
+                mock.patch.object(core, "convert_simple", side_effect=AssertionError("unsafe fallback")),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "cannot be safely downgraded"):
+                    core.convert_auto("mermaid", output)
+
+            with open(output, "rb") as stream:
+                self.assertEqual(stream.read(), MINIMAL_PDF)
+
+    def test_does_not_downgrade_gfm_alert_to_simple(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = os.path.join(tmp, "existing.pdf")
+            with open(output, "wb") as stream:
+                stream.write(MINIMAL_PDF)
+
+            with (
+                mock.patch.object(core, "check_tools", return_value={
+                    "pandoc": True, "chromium": True,
+                    "pdflatex": False, "wkhtmltopdf": True,
+                }),
+                mock.patch.object(core, "detect_sidebar_needed", return_value=(True, "GFM alert box (> [!TIP])")),
+                mock.patch.object(core, "detect_latex_needed", return_value=(False, None)),
+                mock.patch.object(core, "convert_sidebar", side_effect=RuntimeError("browser failed")),
+                mock.patch.object(core, "convert_simple", side_effect=AssertionError("unsafe fallback")),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "cannot be safely downgraded"):
+                    core.convert_auto("alert", output)
+
+            with open(output, "rb") as stream:
+                self.assertEqual(stream.read(), MINIMAL_PDF)
 
     def test_reports_when_no_backend_is_available(self):
         with (
@@ -74,6 +162,69 @@ class AutoOrchestrationTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(RuntimeError, "No renderer produced a valid PDF"):
                 core.convert_auto("plain text", "unused.pdf")
+
+
+
+class MarkdownNormalizationTests(unittest.TestCase):
+    def test_preserves_fenced_code_during_global_replacements(self):
+        source = (
+            "A prose dash — and logic ∧ symbol.\n\n"
+            "```python\n"
+            "message = '— ∧ θ 📂'\n"
+            "print(message)\n"
+            "```\n"
+        )
+        cleaned = core.clean_markdown_for_pdf(source)
+        self.assertIn("A prose dash -- and logic", cleaned)
+        self.assertIn("message = '— ∧ θ 📂'", cleaned)
+
+    def test_preserves_unclosed_fence_to_end_of_file(self):
+        source = "Text —\n~~~python\nvalue = '— ∧'\n"
+        cleaned = core.clean_markdown_for_pdf(source)
+        self.assertIn("value = '— ∧'", cleaned)
+
+    def test_converts_mermaid_but_preserves_other_fences(self):
+        source = (
+            "```mermaid\nflowchart TD\nA --> B\n```\n\n"
+            "```python\nprint('∨ θ')\n```"
+        )
+        cleaned = core.clean_markdown_for_pdf(source)
+        self.assertIn("Diagram (Flowchart)", cleaned)
+        self.assertIn("print('∨ θ')", cleaned)
+
+class GuiConversionWorkerTests(unittest.TestCase):
+    def test_worker_reports_success_without_touching_ui(self):
+        import md2pdf_app
+        with tempfile.TemporaryDirectory() as tmp:
+            output = os.path.join(tmp, "result.pdf")
+
+            def write_pdf(_markdown, path, **_kwargs):
+                with open(path, "wb") as stream:
+                    stream.write(MINIMAL_PDF)
+
+            app = md2pdf_app.MD2PDFStudioApp.__new__(md2pdf_app.MD2PDFStudioApp)
+            app._conversion_queue = __import__("queue").Queue()
+
+            with mock.patch.object(md2pdf_app, "convert_simple", side_effect=write_pdf):
+                app._convert_worker("content", output, "14mm", "simple", "light", False)
+
+            result = app._conversion_queue.get_nowait()
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["save_path"], output)
+            self.assertFalse(result["open_pdf"])
+            self.assertGreater(result["file_size_kb"], 0)
+
+    def test_worker_reports_renderer_failure(self):
+        import md2pdf_app
+        app = md2pdf_app.MD2PDFStudioApp.__new__(md2pdf_app.MD2PDFStudioApp)
+        app._conversion_queue = __import__("queue").Queue()
+
+        with mock.patch.object(md2pdf_app, "convert_simple", side_effect=RuntimeError("renderer failed")):
+            app._convert_worker("content", "unused.pdf", "14mm", "simple", "light", False)
+
+        result = app._conversion_queue.get_nowait()
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"], "renderer failed")
 
 
 if __name__ == "__main__":
