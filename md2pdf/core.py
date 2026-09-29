@@ -54,14 +54,24 @@ def validate_pdf_output(path: str) -> None:
             stream.seek(max(0, os.path.getsize(path) - 4096))
             tail = stream.read()
             stream.seek(0)
-            sample = stream.read(min(os.path.getsize(path), 8 * 1024 * 1024))
+            has_page_object = False
+            overlap = b""
+            while True:
+                chunk = stream.read(1024 * 1024)
+                if not chunk:
+                    break
+                scan = overlap + chunk
+                if b"/Type /Page" in scan or b"/Type/Page" in scan:
+                    has_page_object = True
+                    break
+                overlap = scan[-32:]
     except OSError as exc:
         raise RuntimeError(f"Could not read generated PDF: {exc}") from exc
     if not header.startswith(b"%PDF-"):
         raise RuntimeError(f"Output does not have a PDF signature: {path}")
     if b"%%EOF" not in tail:
         raise RuntimeError(f"PDF appears truncated (missing %%EOF): {path}")
-    if b"/Type /Page" not in sample and b"/Type/Page" not in sample:
+    if not has_page_object:
         raise RuntimeError(f"PDF contains no detectable page objects: {path}")
 
 
