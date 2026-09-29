@@ -122,7 +122,7 @@ def _protect_fenced_blocks(text: str):
             ):
                 index = len(protected)
                 protected.append("".join(current))
-                output.append(f"\x00MD2PDF_BLOCK_{index}\x00")
+        output.append(f"\x00MD2PDF_BLOCK_{index}\x00")
                 current = []
                 opening_char = None
                 opening_length = 0
@@ -130,7 +130,7 @@ def _protect_fenced_blocks(text: str):
     if current:
         index = len(protected)
         protected.append("".join(current))
-                output.append(f"\x00MD2PDF_BLOCK_{index}\x00")
+        output.append(f"\x00MD2PDF_BLOCK_{index}\x00")
     return "".join(output), protected
 
 
