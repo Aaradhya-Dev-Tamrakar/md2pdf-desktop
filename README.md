@@ -149,8 +149,11 @@ The repository includes a dedicated sync engine enforcing pre-commit secret scan
 # Safe pull only
 .\sync.ps1 -PullOnly
 
-# Dry run preview
+# Dry run preview (read-only; does not stage or reset files)
 .\sync.ps1 -WhatIf
+
+# Explicitly repair a missing/mismatched origin remote
+.\sync.ps1 -RepairRemote
 ```
 
 ---
@@ -175,7 +178,7 @@ Run the standard-library regression suite:
 python -m unittest discover -s tests -v
 ```
 
-The tests cover PDF output integrity checks and automatic-renderer fallback behavior. They do not replace end-to-end tests against real Pandoc, Chromium, LaTeX, and wkhtmltopdf installations.
+The tests cover PDF output integrity checks, automatic-renderer fallback behavior, Markdown normalization, package installation, and GUI worker behavior. A separate integration job invokes the real Pandoc + wkhtmltopdf pipeline.
 
 ### Reproducibility note
 
