@@ -19,8 +19,8 @@ The new unit tests do not require Pandoc, Chromium, LaTeX, or wkhtmltopdf becaus
 
 ## Known issues not addressed here
 
-- Sidebar rendering still loads KaTeX and Mermaid from remote CDN URLs; offline/deterministic rendering needs vendored assets.
-- Markdown normalization still uses global string replacements in places; an AST-aware transform should replace those in a dedicated change.
+- Sidebar rendering now uses locally cached, hash-verified KaTeX 0.16.11 and Mermaid 10.9.3 assets provisioned from exact npm tarballs. The first provisioning step needs network access; `MD2PDF_OFFLINE=1` enforces cache-only operation.
+- Browser font/engine differences can still affect pixel-level output even with fixed web assets; renderer output should be validated on the target environment.
 - The Tkinter conversion action still runs synchronously on the UI thread.
 - The sync script's staging/remote behavior needs a separate safety-focused review.
 - Renderer-specific visual pagination behavior is not yet covered by regression fixtures.
