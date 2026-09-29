@@ -46,7 +46,7 @@
 .PARAMETER CheckTools
     Verifies PDF conversion toolchains (pandoc, wkhtmltopdf, pdflatex) and tests the LaTeX template.
 
-PARAMETER RepairRemote
+ .PARAMETER RepairRemote
     Explicitly add or repair the expected origin remote URL. Without this switch, a missing or mismatched origin is treated as a safety error.
 
 .PARAMETER Test
