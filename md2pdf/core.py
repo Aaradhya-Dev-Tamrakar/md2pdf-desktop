@@ -61,7 +61,7 @@ def validate_pdf_output(path: str) -> None:
                 if not chunk:
                     break
                 scan = overlap + chunk
-                if b"/Type /Page" in scan or b"/Type/Page" in scan:
+                if re.search(rb"/Type\\s*/Page(?:\\s|/|>)", scan):
                     has_page_object = True
                     break
                 overlap = scan[-32:]
