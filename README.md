@@ -78,6 +78,7 @@ python md2pdf_app.py
 - **Dynamic Syntax Auto-Detector**: Automatically analyzes editor text and informs you why a specific engine was chosen.
 - **Live Document Stats**: Tracks line count, word count, character count, and file size in real time.
 - **Quick Action Bar**: `📂 Open .md File`, `📋 Paste Clipboard`, `🧹 Clear`, and active file badge.
+- **Responsive Conversion**: PDF rendering runs in a background worker so the Tkinter editor remains interactive while conversion is in progress.
 - **Export Presets & Automation**: Quick margin dropdown (`10mm`, `14mm`, `20mm`, `0.5in`), auto-open PDF on completion, and `📁 Show in Folder` shortcut.
 
 ---
