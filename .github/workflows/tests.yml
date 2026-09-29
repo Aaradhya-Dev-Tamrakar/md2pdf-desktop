@@ -54,6 +54,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install package under test
+        run: python -m pip install --disable-pip-version-check .
       - name: Run real renderer integration test
         run: python -m unittest tests.test_renderer_integration -v
 
@@ -71,6 +73,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install package under test
+        run: python -m pip install --disable-pip-version-check .
       - name: Provision exact browser assets
         env:
           MD2PDF_ASSET_DIR: ${{ runner.temp }}/md2pdf-web-assets
