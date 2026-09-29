@@ -1,6 +1,6 @@
 # Stabilization pass — September 2026
 
-This branch contains a focused reliability pass. It is intentionally not a renderer rewrite.
+This document records the stabilization baseline and the Phase 2 reliability extensions. It is intentionally not a renderer rewrite.
 
 ## Changes
 
@@ -10,6 +10,10 @@ This branch contains a focused reliability pass. It is intentionally not a rende
 - Made `convert_auto` report attempted backends and their failures instead of silently swallowing every exception.
 - Routed MCP `mode="auto"` through the shared core orchestrator.
 - Added standard-library regression tests and a GitHub Actions workflow.
+- Moved desktop PDF conversion off the Tkinter UI thread.
+- Hardened `sync.ps1` against mixed staging, index mutation during `-WhatIf`, and silent remote rewriting.
+- Added package build/installation checks plus real Pandoc + wkhtmltopdf integration coverage.
+- Replaced Sidebar CDN-at-render-time loading with exact-version, SHA-512-verified local browser assets and an offline mode.
 
 ## Validation contract and limitations
 
@@ -17,13 +21,12 @@ The built-in validator is a lightweight integrity check. It checks the PDF signa
 
 The new unit tests do not require Pandoc, Chromium, LaTeX, or wkhtmltopdf because external renderers are mocked in orchestration tests. Real renderer integration tests remain necessary.
 
-## Known issues not addressed here
+## Remaining limitations
 
-- Sidebar rendering now uses locally cached, hash-verified KaTeX 0.16.11 and Mermaid 10.9.3 assets provisioned from exact npm tarballs. The first provisioning step needs network access; `MD2PDF_OFFLINE=1` enforces cache-only operation.
-- Browser font/engine differences can still affect pixel-level output even with fixed web assets; renderer output should be validated on the target environment.
-- The Tkinter conversion action still runs synchronously on the UI thread.
-- The sync script's staging/remote behavior needs a separate safety-focused review.
+- First-time Sidebar asset provisioning still needs network access to obtain the exact npm tarballs. After provisioning, `MD2PDF_OFFLINE=1` enforces cache-only operation.
+- Browser engine, operating-system, and font differences can still affect pixel-level output even with fixed web assets.
 - Renderer-specific visual pagination behavior is not yet covered by regression fixtures.
+- The built-in PDF validator remains lightweight; a later phase can add a full PDF parser and semantic PDF assertions.
 
 ## Run tests
 
