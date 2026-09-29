@@ -104,5 +104,40 @@ class MarkdownNormalizationTests(unittest.TestCase):
         self.assertIn("Diagram (Flowchart)", cleaned)
         self.assertIn("print('∨ θ')", cleaned)
 
+class GuiConversionWorkerTests(unittest.TestCase):
+    def test_worker_reports_success_without_touching_ui(self):
+        import md2pdf_app
+        with tempfile.TemporaryDirectory() as tmp:
+            output = os.path.join(tmp, "result.pdf")
+
+            def write_pdf(_markdown, path, **_kwargs):
+                with open(path, "wb") as stream:
+                    stream.write(MINIMAL_PDF)
+
+            app = md2pdf_app.MD2PDFStudioApp.__new__(md2pdf_app.MD2PDFStudioApp)
+            app._conversion_queue = __import__("queue").Queue()
+
+            with mock.patch.object(md2pdf_app, "convert_simple", side_effect=write_pdf):
+                app._convert_worker("content", output, "14mm", "simple", "light", False)
+
+            result = app._conversion_queue.get_nowait()
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["save_path"], output)
+            self.assertFalse(result["open_pdf"])
+            self.assertGreater(result["file_size_kb"], 0)
+
+    def test_worker_reports_renderer_failure(self):
+        import md2pdf_app
+        app = md2pdf_app.MD2PDFStudioApp.__new__(md2pdf_app.MD2PDFStudioApp)
+        app._conversion_queue = __import__("queue").Queue()
+
+        with mock.patch.object(md2pdf_app, "convert_simple", side_effect=RuntimeError("renderer failed")):
+            app._convert_worker("content", "unused.pdf", "14mm", "simple", "light", False)
+
+        result = app._conversion_queue.get_nowait()
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"], "renderer failed")
+
+
 if __name__ == "__main__":
     unittest.main()
