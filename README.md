@@ -8,7 +8,7 @@ Three operational surfaces:
 - **MCP Server** ([`mcp_server/server.py`](./mcp_server/server.py)) — FastMCP server exposing headless conversion tools to Google Antigravity, Claude Code, and Claude Desktop.
 - **PowerShell Sync Engine** ([`sync.ps1`](./sync.ps1)) — Automated git synchronization, pre-commit secret scanning, and toolchain health validation.
 
-All surfaces share conversion functions in [`md2pdf/core.py`](./md2pdf/core.py). Explicit renderer modes intentionally produce different styling; automatic backend selection is centralized in the shared core. Output should be reviewed for visual correctness before publication.
+All surfaces share conversion functions in [`md2pdf/core.py`](./md2pdf/core.py). Explicit renderer modes intentionally produce different styling; automatic backend selection is centralized in the shared core. Phase 3 adds semantic PDF parsing and a maintained release regression corpus so artifact correctness is tested in addition to process success.
 
 ---
 
@@ -64,7 +64,7 @@ md2pdf notes.md --mode auto --output notes.pdf
 md2pdf notes.md --mode sidebar --theme dark --margin 14mm
 ```
 
-The CLI reports the selected renderer and returns a non-zero exit code for invalid input or conversion failures. Pandoc and the chosen renderer executable remain system dependencies; installing the Python package does not install those tools. MCP server dependencies remain in `requirements.txt`.
+The CLI reports the selected renderer and returns a non-zero exit code for invalid input or conversion failures. `md2pdf --version` reports the installed package version. Pandoc and the chosen renderer executable remain system dependencies; installing the Python package does not install those tools. MCP server dependencies remain in `requirements.txt`.
 
 Provision or verify the Sidebar browser assets explicitly:
 
@@ -181,6 +181,12 @@ The repository includes a dedicated sync engine enforcing pre-commit secret scan
 
 ---
 
+## 🚢 Release-quality validation
+
+The Phase 3 release candidate is version `0.3.0`. Release validation covers the Python 3.10–3.12 matrix, wheel + source-distribution contents, installed CLI smoke tests, real `Pandoc → wkhtmltopdf` rendering, real offline Sidebar/Chromium rendering, semantic PDF parsing through `pypdf`, and a maintained rendering corpus. See [`docs/RELEASE_CHECKLIST.md`](./docs/RELEASE_CHECKLIST.md).
+
+Release artifacts are built by [`release.yml`](./.github/workflows/release.yml) when a `v*` tag is pushed. The project does not bundle Pandoc, Chromium, TeX, or wkhtmltopdf; these remain documented system dependencies.
+
 ## 🧪 Reliability checks
 
 Run the standard-library regression suite:
@@ -189,8 +195,13 @@ Run the standard-library regression suite:
 python -m unittest discover -s tests -v
 ```
 
-The tests cover PDF output integrity checks, automatic-renderer fallback behavior, Markdown normalization, package installation, and GUI worker behavior. A separate integration job invokes the real Pandoc + wkhtmltopdf pipeline.
+The tests cover PDF parsing and artifact integrity, automatic-renderer fallback behavior, Markdown normalization, package installation, GUI worker behavior, and the release regression corpus. Separate integration jobs invoke the real Pandoc + wkhtmltopdf and Chromium Sidebar pipelines.
 
 ### Reproducibility note
 
 Sidebar mode no longer loads KaTeX or Mermaid from a CDN at render time. The exact KaTeX 0.16.11 and Mermaid 10.9.3 npm package tarballs are SHA-512 verified before the required browser assets are extracted into a local cache. Set `MD2PDF_OFFLINE=1` to forbid network provisioning and require an existing verified cache. Browser, operating-system, and font rendering differences can still affect pixel-level output; the project therefore validates artifact integrity and exercises the real Chromium path in CI rather than claiming byte-for-byte PDF identity.
+
+
+## 📋 Phase 3 scope
+
+Phase 3 is deliberately a release-hardening layer rather than a renderer feature expansion. The goal is to make the current behavior measurable, parse-validated, regression-tested, packaged, and releasable without claiming pixel-identical PDFs across operating systems.

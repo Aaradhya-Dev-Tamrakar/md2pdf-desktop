@@ -1,9 +1,12 @@
+__version__ = "0.3.0"
+
 from .core import (
     LATEX_TEMPLATE,
     LUA_FILTER,
     check_tools,
     convert_auto,
     validate_pdf_output,
+    inspect_pdf_output,
     build_sidebar_asset_head,
     convert_latex,
     convert_sidebar,
@@ -20,6 +23,8 @@ __all__ = [
     "check_tools",
     "convert_auto",
     "validate_pdf_output",
+    "inspect_pdf_output",
+    "__version__",
     "build_sidebar_asset_head",
     "convert_latex",
     "convert_sidebar",

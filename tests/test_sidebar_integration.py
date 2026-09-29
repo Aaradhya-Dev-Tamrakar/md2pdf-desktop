@@ -1,37 +1,36 @@
-"""End-to-end Sidebar renderer smoke test using local browser assets."""
-
+"""End-to-end release corpus tests for the Sidebar renderer."""
+import json
 import os
 import tempfile
 import unittest
+from pathlib import Path
 
-from md2pdf import convert_sidebar, validate_pdf_output
+from md2pdf import convert_sidebar, inspect_pdf_output
 from md2pdf.web_assets import ensure_web_assets
+
+CORPUS = Path(__file__).parent / "fixtures" / "release_corpus.json"
+DATA = json.loads(CORPUS.read_text(encoding="utf-8"))
 
 
 @unittest.skipUnless(
     os.environ.get("MD2PDF_SIDEBAR_INTEGRATION") == "1",
-    "Sidebar integration test is opt-in",
+    "Sidebar integration is opt-in",
 )
 class SidebarRendererIntegrationTests(unittest.TestCase):
-    def test_sidebar_uses_local_katex_and_mermaid_assets(self):
-        markdown = """# Sidebar Integration
-
-Inline math: $x^2 + y^2 = z^2$.
-
-```mermaid
-flowchart TD
-    A[Start] --> B[Render]
-    B --> C[Done]
-```
-"""
-        asset_dir = ensure_web_assets(offline=True)
-        self.assertTrue((asset_dir / "katex.min.js").is_file())
-        self.assertTrue((asset_dir / "mermaid.min.js").is_file())
-        with tempfile.TemporaryDirectory() as tmp:
-            output = os.path.join(tmp, "sidebar.pdf")
-            convert_sidebar(markdown, output, margin="10mm", theme="light")
-            validate_pdf_output(output)
-            self.assertGreater(os.path.getsize(output), 1024)
+    def test_sidebar_uses_local_assets_and_passes_release_corpus(self):
+        ensure_web_assets(offline=True)
+        for item in [x for x in DATA["fixtures"] if x["renderer"] == "sidebar"]:
+            with self.subTest(fixture=item["file"]):
+                markdown = (CORPUS.parent / item["file"]).read_text(encoding="utf-8")
+                with tempfile.TemporaryDirectory() as tmp:
+                    output = os.path.join(tmp, "fixture.pdf")
+                    convert_sidebar(markdown, output, margin="10mm", theme="light")
+                    info = inspect_pdf_output(output, extract_text=True)
+                    self.assertGreaterEqual(info["pages"], item["min_pages"])
+                    from pypdf import PdfReader
+                    extracted = "\n".join(page.extract_text() or "" for page in PdfReader(output, strict=False).pages)
+                    for marker in item["required_text"]:
+                        self.assertIn(marker, extracted)
 
 
 if __name__ == "__main__":
