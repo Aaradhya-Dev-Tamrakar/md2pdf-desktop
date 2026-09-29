@@ -42,3 +42,17 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check --force-reinstall --no-deps dist/*.whl
           python -m md2pdf.cli --help
+
+  renderer-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native renderer toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pandoc wkhtmltopdf
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run real renderer integration test
+        run: python -m unittest tests.test_renderer_integration -v
