@@ -1,6 +1,7 @@
 """End-to-end release corpus tests for the Simple renderer."""
 import json
 import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -27,8 +28,12 @@ class SimpleRendererIntegrationTests(unittest.TestCase):
                     self.assertGreaterEqual(info["pages"], item["min_pages"])
                     from pypdf import PdfReader
                     extracted = "\n".join(page.extract_text() or "" for page in PdfReader(output, strict=False).pages)
+                    normalized = re.sub(r"\s+", " ", extracted).strip()
                     for marker in item["required_text"]:
-                        self.assertIn(marker, extracted)
+                        self.assertIn(
+                            re.sub(r"\s+", " ", marker).strip(),
+                            normalized,
+                        )
 
 
 if __name__ == "__main__":
