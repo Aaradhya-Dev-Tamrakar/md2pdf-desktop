@@ -1044,55 +1044,53 @@ def convert_sidebar(md_content: str, save_path: str, margin: str = "14mm", theme
             with open(md_file, "w", encoding="utf-8") as f:
                 f.write(cleaned)
 
-        # Render markdown to HTML fragment via pandoc
-        res = _run_process([
-            "pandoc", md_file,
-            "-f", "markdown+raw_html+pipe_tables",
-            "-t", "html5",
-            "-o", body_html_file,
-        ], capture_output=True, text=True)
+            # Render markdown to HTML fragment via pandoc
+            res = _run_process([
+                "pandoc", md_file,
+                "-f", "markdown+raw_html+pipe_tables",
+                "-t", "html5",
+                "-o", body_html_file,
+            ], capture_output=True, text=True)
 
-        if res.returncode != 0:
-            raise RuntimeError(f"pandoc failed:\n{res.stderr}")
+            if res.returncode != 0:
+                raise RuntimeError(f"pandoc failed:\n{res.stderr}")
 
-        with open(body_html_file, "r", encoding="utf-8") as f:
-            body_content = f.read()
+            with open(body_html_file, "r", encoding="utf-8") as f:
+                body_content = f.read()
 
-        asset_head = build_sidebar_asset_head()
+            asset_head = build_sidebar_asset_head()
 
-        full_html = HTML_SIDEBAR_WRAPPER.format(
-            asset_head=asset_head,
-            css=css_content,
-            body=body_content,
-            mermaid_theme=mermaid_theme,
-            is_dark="true" if is_dark else "false",
-            bg_color=bg_color,
-            box_bkg=box_bkg,
-            text_color=text_color,
-            line_color=line_color,
-            border_color=border_color,
-        )
+            full_html = HTML_SIDEBAR_WRAPPER.format(
+                asset_head=asset_head,
+                css=css_content,
+                body=body_content,
+                mermaid_theme=mermaid_theme,
+                is_dark="true" if is_dark else "false",
+                bg_color=bg_color,
+                box_bkg=box_bkg,
+                text_color=text_color,
+                line_color=line_color,
+                border_color=border_color,
+            )
 
-        with open(final_html_file, "w", encoding="utf-8") as f:
-            f.write(full_html)
+            with open(final_html_file, "w", encoding="utf-8") as f:
+                f.write(full_html)
 
-        cmd = [
-            chrome,
-            "--headless=new",
-            "--disable-gpu",
-            "--allow-file-access-from-files",
-            "--virtual-time-budget=10000",
-            "--run-all-compositor-stages-before-draw",
-            "--no-pdf-header-footer",
-            f"--print-to-pdf={temporary_output}",
-            final_html_file,
-        ]
+            cmd = [
+                chrome,
+                "--headless=new",
+                "--disable-gpu",
+                "--allow-file-access-from-files",
+                "--virtual-time-budget=10000",
+                "--run-all-compositor-stages-before-draw",
+                "--no-pdf-header-footer",
+                f"--print-to-pdf={temporary_output}",
+                final_html_file,
+            ]
 
-        p_res = _run_process(cmd, capture_output=True, text=True, timeout=60)
-        if p_res.returncode != 0:
-            raise RuntimeError(f"Chromium PDF generation failed:\n{p_res.stderr.strip()}")
-        validate_pdf_output(save_path)
-
+            p_res = _run_process(cmd, capture_output=True, text=True, timeout=60)
+            if p_res.returncode != 0:
+                raise RuntimeError(f"Chromium PDF generation failed:\n{p_res.stderr.strip()}")
 
 def convert_auto(md_content: str, save_path: str, margin: str = "0.5in", theme: str = "light"):
     """Select a renderer and fall back only when a backend is available.
@@ -1140,11 +1138,6 @@ def convert_auto(md_content: str, save_path: str, margin: str = "0.5in", theme: 
             if sidebar_is_required and backend == "sidebar":
                 attempts.append("auto: specialized Sidebar features cannot be safely downgraded")
                 break
-            try:
-                if os.path.exists(save_path):
-                    os.remove(save_path)
-            except OSError:
-                pass
 
     context = []
     if reason_sidebar:
