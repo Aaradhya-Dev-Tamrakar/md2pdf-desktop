@@ -83,6 +83,53 @@ LATEX_TEMPLATE = os.path.join(PACKAGE_DIR, "templates", "styled.latex")
 LUA_FILTER = os.path.join(PACKAGE_DIR, "templates", "callout-boxes.lua")
 
 # ---------------------------------------------------------------------------
+# Context-aware Markdown protection
+# ---------------------------------------------------------------------------
+def _protect_fenced_blocks(text: str):
+    """Protect ordinary fenced code blocks from global normalization.
+
+    Mermaid fences are intentionally transformed before this helper runs.
+    All other fenced blocks are restored byte-for-byte before Pandoc sees them.
+    """
+    lines = text.splitlines(keepends=True)
+    protected = []
+    output = []
+    current = []
+    fence_char = chr(96)
+    in_fence = False
+
+    for line in lines:
+        stripped = line.lstrip()
+        starts_backtick = stripped.startswith(fence_char * 3)
+        starts_tilde = stripped.startswith("~~~")
+        if not in_fence and (starts_backtick or starts_tilde):
+            in_fence = True
+            current = [line]
+            continue
+        if in_fence:
+            current.append(line)
+            closing_backtick = stripped.startswith(fence_char * 3)
+            closing_tilde = stripped.startswith("~~~")
+            if closing_backtick or closing_tilde:
+                index = len(protected)
+                protected.append("".join(current))
+                output.append(f"\x00MD2PDF_BLOCK_{index}\x00")
+                current = []
+                in_fence = False
+            continue
+        output.append(line)
+
+    if current:
+        output.extend(current)
+    return "".join(output), protected
+
+
+def _restore_fenced_blocks(text: str, blocks):
+    for index, block in enumerate(blocks):
+        text = text.replace(f"\x00MD2PDF_BLOCK_{index}\x00", block)
+    return text
+
+# ---------------------------------------------------------------------------
 # Content-based LaTeX-need detection
 # ---------------------------------------------------------------------------
 _DISPLAY_MATH = re.compile(r"\$\$.+?\$\$", re.S)
@@ -229,104 +276,106 @@ def ascii_grid_to_markdown(block: str) -> str:
 
 
 def clean_markdown_for_pdf(md_content: str, mode: str = "auto") -> str:
-    """
-    Sanitizes and normalizes markdown for high-quality, bug-free PDF rendering:
-    1. Automatically transforms ASCII grid tables (+---+ borders) into native Markdown tables.
-    2. Replaces Unicode emojis that crash pdflatex or render as missing squares.
-    3. Converts Unicode box-drawing characters and geometric symbols into clean ASCII.
-    4. Formats Mermaid graph blocks into readable callout diagram blocks with sanitized characters.
-    5. Converts isolated Unicode math/logic symbols (¬, ∨, ∧, ∞, ε, θ, ·) into LaTeX math mode.
-    6. Normalizes escaped LaTeX delimiters (\\( -> $, \\[ -> $$).
-    7. Strips corrupted encoding artifacts (e.g. \\ufffd).
+    """Normalize Markdown while preserving ordinary fenced code literally.
+
+    Mermaid fences and explicitly marked ASCII tables are transformed; other
+    fenced blocks are protected from document-wide Unicode replacements.
     """
     if not md_content:
         return ""
 
-    text = md_content.replace('\ufffd', '-')
+    text = md_content.replace("\ufffd", "-")
+    fence = chr(96)
 
-    # Convert ASCII grid code blocks into native Markdown pipe tables
+    # Mermaid is a semantic diagram block, so transform it before ordinary
+    # fenced-code protection. Symbols inside Mermaid are normalized locally.
+    def _replace_mermaid(match):
+        diagram_code = match.group(1).strip()
+        diagram_code = (
+            diagram_code.replace("∨", " OR ")
+            .replace("∧", " AND ")
+            .replace("¬", "~")
+            .replace("θ", "theta")
+            .replace("ε", "eps")
+            .replace("∞", "inf")
+        )
+        return (
+            "::: {.callout}\n"
+            "**Diagram (Flowchart):**\n"
+            + fence * 3 + "\n"
+            + diagram_code
+            + "\n" + fence * 3 + "\n:::"
+        )
+
+    mermaid_pattern = fence * 3 + r"mermaid\s*\n(.*?)\n" + fence * 3
+    text = re.sub(mermaid_pattern, _replace_mermaid, text, flags=re.DOTALL)
+
+    # Protect all remaining fenced blocks before any global normalization.
+    text, protected_blocks = _protect_fenced_blocks(text)
+
+    # Convert only explicitly labelled text/ascii grid tables. Unlabelled
+    # code fences remain code and are restored unchanged below.
     def _replace_ascii_tables(match):
         code_body = match.group(1).strip()
         lines = [l.strip() for l in code_body.splitlines() if l.strip()]
         if (
             lines
-            and lines[0].startswith('+')
-            and lines[-1].startswith('+')
-            and all(l.startswith(('+', '|')) for l in lines)
+            and lines[0].startswith("+")
+            and lines[-1].startswith("+")
+            and all(l.startswith(("+", "|")) for l in lines)
         ):
             converted = ascii_grid_to_markdown(code_body)
             if converted != code_body:
                 return converted
         return match.group(0)
 
-    text = re.sub(
-        r'```(?:text|ascii)?\s*\n(\+[-+=|]+\+\n.*?\n\+[-+=|]+\+)\s*\n```',
-        _replace_ascii_tables,
-        text,
-        flags=re.DOTALL,
+    labelled_pattern = (
+        fence * 3 + r"(?:text|ascii)\s*\n"
+        r"(\+[-+=|]+\+\n.*?\n\+[-+=|]+\+)\s*\n"
+        + fence * 3
     )
+    text = re.sub(labelled_pattern, _replace_ascii_tables, text, flags=re.DOTALL)
 
-    # Convert naked ASCII grid tables (not in code blocks)
+    # Convert naked ASCII grid tables, which are unambiguously table-shaped.
     def _replace_naked_ascii_tables(match):
         table_text = match.group(1).strip()
         converted = ascii_grid_to_markdown(table_text)
         return "\n\n" + converted + "\n\n"
 
     text = re.sub(
-        r'(?:^|\n)(\+[-+=|]+\+\n(?:[+|].*?\n)+\+[-+=|]+\+)(?=\n|$)',
+        r"(?:^|\n)(\+[-+=|]+\+\n(?:[+|].*?\n)+\+[-+=|]+\+)(?=\n|$)",
         _replace_naked_ascii_tables,
         text,
     )
 
-    # Common unicode and emoji normalization
     replacements = {
-        '📂': '[Folder]', '📁': '[Folder]', '🎯': '[Target]', '🎬': '[Video]',
-        '✅': '[OK]', '✔': '[OK]', '❌': '[X]', '⏳': '[Pending]', '🎉': '',
-        '⚠️': '[Warning]', '•': '-', '—': '--', '–': '-',
-        '“': '"', '”': '"', '‘': "'", '’': "'", '°': ' deg',
-        '▲': '^', '▼': 'v', '►': '>', '◄': '<',
-        '│': '|', '─': '-', '┌': '+', '┐': '+', '└': '+', '┘': '+',
-        '├': '+', '┤': '+', '┬': '+', '┴': '+', '┼': '+',
-        '□': '[ ]', '⌊': '[', '⌋': ']', '↓': 'v', '↑': '^',
+        "📂": "[Folder]", "📁": "[Folder]", "🎯": "[Target]", "🎬": "[Video]",
+        "✅": "[OK]", "✔": "[OK]", "❌": "[X]", "⏳": "[Pending]", "🎉": "",
+        "⚠️": "[Warning]", "•": "-", "—": "--", "–": "-",
+        "“": '"', "”": '"', "‘": "'", "’": "'", "°": " deg",
+        "▲": "^", "▼": "v", "►": ">", "◄": "<",
+        "│": "|", "─": "-", "┌": "+", "┐": "+", "└": "+", "┘": "+",
+        "├": "+", "┤": "+", "┬": "+", "┴": "+", "┼": "+",
+        "□": "[ ]", "⌊": "[", "⌋": "]", "↓": "v", "↑": "^",
     }
-    for k, v in replacements.items():
-        text = text.replace(k, v)
+    for key, value in replacements.items():
+        text = text.replace(key, value)
 
-    # Strip remaining 4-byte SMP emojis for LaTeX safety
-    text = re.sub(r'[\U00010000-\U0010ffff]', '', text)
+    text = re.sub(r"[\U00010000-\U0010ffff]", "", text)
+    text = text.replace("∨", r" $\lor$ ")
+    text = text.replace("∧", r" $\land$ ")
+    text = text.replace("¬", r" $\neg$ ")
+    text = text.replace("∞", r" $\infty$ ")
+    text = text.replace("ε", r" $\varepsilon$ ")
+    text = text.replace("θ", r" $\theta$ ")
+    text = text.replace("·", r" $\cdot$ ")
 
-    # Convert Mermaid code fences to clean diagram callouts
-    def _replace_mermaid(match):
-        diagram_code = match.group(1).strip()
-        # Clean logic & math symbols inside mermaid code block to ascii
-        diagram_code = (
-            diagram_code.replace('∨', ' OR ')
-            .replace('∧', ' AND ')
-            .replace('¬', '~')
-            .replace('θ', 'theta')
-            .replace('ε', 'eps')
-            .replace('∞', 'inf')
-        )
-        return f"::: {{.callout}}\n**Diagram (Flowchart):**\n```\n{diagram_code}\n```\n:::"
+    text = re.sub(r"\\\\\(", "$", text)
+    text = re.sub(r"\\\\\)", "$", text)
+    text = re.sub(r"\\\\\[", "$$", text)
+    text = re.sub(r"\\\\\]", "$$", text)
 
-    text = re.sub(r'```mermaid\s*\n(.*?)\n```', _replace_mermaid, text, flags=re.DOTALL)
-
-    # Clean logic and math symbols outside mermaid
-    text = text.replace('∨', r' $\lor$ ')
-    text = text.replace('∧', r' $\land$ ')
-    text = text.replace('¬', r' $\neg$ ')
-    text = text.replace('∞', r' $\infty$ ')
-    text = text.replace('ε', r' $\varepsilon$ ')
-    text = text.replace('θ', r' $\theta$ ')
-    text = text.replace('·', r' $\cdot$ ')
-
-    # Normalize escaped LaTeX brackets from LLM outputs
-    text = re.sub(r'\\\\\(', '$', text)
-    text = re.sub(r'\\\\\)', '$', text)
-    text = re.sub(r'\\\\\[', '$$', text)
-    text = re.sub(r'\\\\\]', '$$', text)
-
-    return text
+    return _restore_fenced_blocks(text, protected_blocks)
 
 
 DEFAULT_CSS = """
@@ -506,19 +555,19 @@ def prepare_mermaid_for_html(md_text: str) -> str:
 
 
 def clean_markdown_for_sidebar(md_content: str) -> str:
-    """Sanitizes and prepares markdown for modern Chromium/KaTeX/Mermaid rendering."""
+    """Prepare Markdown for Chromium while preserving ordinary code blocks."""
     if not md_content:
         return ""
-    text = md_content.replace('\ufffd', '-')
+    text = md_content.replace("\ufffd", "-")
     text = transform_gfm_alerts(text)
     text = prepare_mermaid_for_html(text)
+    text, protected_blocks = _protect_fenced_blocks(text)
 
-    # Normalize escaped brackets from LLMs
-    text = re.sub(r'\\\\\(', '$', text)
-    text = re.sub(r'\\\\\)', '$', text)
-    text = re.sub(r'\\\\\[', '$$', text)
-    text = re.sub(r'\\\\\]', '$$', text)
-    return text
+    text = re.sub(r"\\\\\(", "$", text)
+    text = re.sub(r"\\\\\)", "$", text)
+    text = re.sub(r"\\\\\[", "$$", text)
+    text = re.sub(r"\\\\\]", "$$", text)
+    return _restore_fenced_blocks(text, protected_blocks)
 
 
 SIDEBAR_DARK_CSS = """
