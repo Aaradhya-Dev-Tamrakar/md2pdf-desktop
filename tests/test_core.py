@@ -63,6 +63,50 @@ class AutoOrchestrationTests(unittest.TestCase):
             self.assertEqual(backend, "simple")
             core.validate_pdf_output(output)
 
+    def test_does_not_downgrade_mermaid_to_simple(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = os.path.join(tmp, "existing.pdf")
+            with open(output, "wb") as stream:
+                stream.write(MINIMAL_PDF)
+
+            with (
+                mock.patch.object(core, "check_tools", return_value={
+                    "pandoc": True, "chromium": True,
+                    "pdflatex": True, "wkhtmltopdf": True,
+                }),
+                mock.patch.object(core, "detect_sidebar_needed", return_value=(True, "Mermaid flowchart/diagram")),
+                mock.patch.object(core, "detect_latex_needed", return_value=(False, None)),
+                mock.patch.object(core, "convert_sidebar", side_effect=RuntimeError("browser failed")),
+                mock.patch.object(core, "convert_simple", side_effect=AssertionError("unsafe fallback")),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "cannot be safely downgraded"):
+                    core.convert_auto("mermaid", output)
+
+            with open(output, "rb") as stream:
+                self.assertEqual(stream.read(), MINIMAL_PDF)
+
+    def test_does_not_downgrade_gfm_alert_to_simple(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = os.path.join(tmp, "existing.pdf")
+            with open(output, "wb") as stream:
+                stream.write(MINIMAL_PDF)
+
+            with (
+                mock.patch.object(core, "check_tools", return_value={
+                    "pandoc": True, "chromium": True,
+                    "pdflatex": False, "wkhtmltopdf": True,
+                }),
+                mock.patch.object(core, "detect_sidebar_needed", return_value=(True, "GFM alert box (> [!TIP])")),
+                mock.patch.object(core, "detect_latex_needed", return_value=(False, None)),
+                mock.patch.object(core, "convert_sidebar", side_effect=RuntimeError("browser failed")),
+                mock.patch.object(core, "convert_simple", side_effect=AssertionError("unsafe fallback")),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "cannot be safely downgraded"):
+                    core.convert_auto("alert", output)
+
+            with open(output, "rb") as stream:
+                self.assertEqual(stream.read(), MINIMAL_PDF)
+
     def test_reports_when_no_backend_is_available(self):
         with (
             mock.patch.object(core, "check_tools", return_value={
