@@ -48,6 +48,23 @@ Content-aware backend selector. Inspects Markdown content:
 
 ---
 
+## 🖥️ Command-line interface
+
+Install the Python package from a checkout (Python 3.10+):
+
+```powershell
+python -m pip install .
+```
+
+Then convert a document:
+
+```powershell
+md2pdf notes.md --mode auto --output notes.pdf
+md2pdf notes.md --mode sidebar --theme dark --margin 14mm
+```
+
+The CLI reports the selected renderer and returns a non-zero exit code for invalid input or conversion failures. Pandoc and the chosen renderer executable remain system dependencies; installing the Python package does not install those tools. MCP server dependencies remain in `requirements.txt`.
+
 ## 🎨 Desktop Studio GUI (`md2pdf_app.py`)
 
 Run the desktop application:
