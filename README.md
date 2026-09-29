@@ -42,9 +42,10 @@ All surfaces share conversion functions in [`md2pdf/core.py`](./md2pdf/core.py).
 
 ### 4. 🧠 Auto Mode
 Content-aware backend selector. Inspects Markdown content:
-- If Mermaid diagrams or GFM alerts are detected $\to$ routes to **Sidebar** mode.
+- If Mermaid diagrams or GFM alerts are detected $\to$ requires **Sidebar** mode; Auto reports the specialized renderer failure rather than silently degrading the document to another backend.
 - If complex LaTeX math or callout divs are detected $\to$ routes to **Sidebar** (if Chromium present) or **LaTeX** (if `pdflatex` present).
 - Otherwise falls back to **Simple** mode.
+- Renderer output is published atomically, so a failed conversion does not replace an existing valid PDF.
 
 ---
 
