@@ -90,6 +90,11 @@ class MarkdownNormalizationTests(unittest.TestCase):
         self.assertIn("A prose dash -- and logic", cleaned)
         self.assertIn("message = '— ∧ θ 📂'", cleaned)
 
+    def test_preserves_unclosed_fence_to_end_of_file(self):
+        source = "Text —\\n~~~python\\nvalue = '— ∧'\\n"
+        cleaned = core.clean_markdown_for_pdf(source)
+        self.assertIn("value = '— ∧'", cleaned)
+
     def test_converts_mermaid_but_preserves_other_fences(self):
         source = (
             "```mermaid\nflowchart TD\nA --> B\n```\n\n"
