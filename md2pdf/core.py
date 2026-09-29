@@ -1106,11 +1106,16 @@ def convert_auto(md_content: str, save_path: str, margin: str = "0.5in", theme: 
     attempts = []
 
     candidates = []
+    sidebar_is_required = reason_sidebar in {
+        "Mermaid flowchart/diagram",
+        "GFM alert box (> [!TIP])",
+    }
     if needed_sidebar:
         candidates.append(("sidebar", bool(tools.get("pandoc") and tools.get("chromium"))))
     if needed_latex:
         candidates.append(("latex", bool(tools.get("pandoc") and tools.get("pdflatex"))))
-    candidates.append(("simple", bool(tools.get("pandoc") and tools.get("wkhtmltopdf"))))
+    if not sidebar_is_required:
+        candidates.append(("simple", bool(tools.get("pandoc") and tools.get("wkhtmltopdf"))))
 
     # Keep the candidate order stable while avoiding duplicate backends.
     seen = set()
@@ -1132,6 +1137,9 @@ def convert_auto(md_content: str, save_path: str, margin: str = "0.5in", theme: 
             return backend
         except Exception as exc:
             attempts.append(f"{backend}: {type(exc).__name__}: {exc}")
+            if sidebar_is_required and backend == "sidebar":
+                attempts.append("auto: specialized Sidebar features cannot be safely downgraded")
+                break
             try:
                 if os.path.exists(save_path):
                     os.remove(save_path)
