@@ -57,6 +57,7 @@ jobs:
   sidebar-integration:
     runs-on: ubuntu-latest
     env:
+      MD2PDF_ASSET_DIR: ${{ runner.temp }}/md2pdf-web-assets
       MD2PDF_SIDEBAR_INTEGRATION: "1"
       MD2PDF_OFFLINE: "1"
     steps:
