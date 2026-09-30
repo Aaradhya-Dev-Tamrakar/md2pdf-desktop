@@ -1,7 +1,9 @@
-# For the MCP server (mcp_server/server.py). The desktop app (md2pdf_app.py)
-# needs no extra Python packages beyond stdlib + Tkinter.
-#
+# Runtime + MCP dependencies.
+# pypdf is imported by md2pdf/core.py and is therefore required by the
+# desktop application as well as the CLI/package installation.
+pypdf==6.19.0
+
+# MCP server (mcp_server/server.py).
 # Pinned to mcp<2: mcp 2.x renamed FastMCP -> MCPServer with breaking changes.
-# This project uses the FastMCP decorator API throughout.
 mcp[cli]<2
 pydantic>=2
