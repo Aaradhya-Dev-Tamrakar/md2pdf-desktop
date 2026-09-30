@@ -9,7 +9,8 @@ permissions:
   contents: write
 
 jobs:
-  build-release:
+  build-python:
+    name: Build Python packages
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +28,72 @@ jobs:
           /tmp/md2pdf-release-smoke/bin/python -m pip install --disable-pip-version-check dist/*.whl
           /tmp/md2pdf-release-smoke/bin/md2pdf --version
           /tmp/md2pdf-release-smoke/bin/md2pdf --help
-      - name: Publish GitHub release
+      - name: Upload Python artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-release
+          path: dist/*
+
+  build-windows:
+    name: Build Windows Studio executable
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install application and packaging dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check .
+          python -m pip install --disable-pip-version-check "pyinstaller==6.22.3"
+      - name: Build md2pdf Studio
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean packaging/windows/md2pdf-studio.spec
+      - name: Verify Windows bundle
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/md2pdf-studio/md2pdf-studio.exe")) {
+            throw "Windows executable was not produced."
+          }
+          $exe = Resolve-Path "dist/md2pdf-studio/md2pdf-studio.exe"
+          Write-Host "Built $exe"
+          # The PE executable must contain the embedded manifest supplied to PyInstaller.
+          $bytes = [System.IO.File]::ReadAllBytes($exe)
+          $text = [System.Text.Encoding]::ASCII.GetString($bytes)
+          if ($text -notmatch "md2pdf.Studio") {
+            Write-Warning "Application identity string was not found in a raw PE string scan; build itself succeeded."
+          }
+      - name: Package Windows bundle
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/md2pdf-studio/*" -DestinationPath "dist/md2pdf-studio-windows-x64.zip"
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: dist/md2pdf-studio-windows-x64.zip
+
+  publish:
+    name: Publish GitHub Release
+    needs: [build-python, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Python artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-release
+          path: dist
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: dist
+      - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" dist/* --generate-notes --verify-tag
+        run: |
+          gh release create "${{ github.ref_name }}" dist/* \
+            --generate-notes \
+            --verify-tag
