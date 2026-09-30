@@ -63,6 +63,35 @@ def _enable_windows_dpi_awareness():
 
 _enable_windows_dpi_awareness()
 
+def _enable_windows_thread_dpi_awareness():
+    """Set the current GUI thread to Per-Monitor V2 before Tk creates windows."""
+    if sys.platform != "win32":
+        return
+
+    try:
+        set_context = ctypes.windll.user32.SetThreadDpiAwarenessContext
+        set_context.argtypes = [ctypes.c_void_p]
+        set_context.restype = ctypes.c_void_p
+
+        # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = (HANDLE)-4.
+        previous = set_context(ctypes.c_void_p(-4))
+        if previous:
+            return
+    except (AttributeError, OSError, OverflowError):
+        pass
+
+    # Older Windows fallback: Per-Monitor V1.
+    try:
+        set_awareness = ctypes.windll.shcore.SetProcessDpiAwareness
+        set_awareness.argtypes = [ctypes.c_int]
+        set_awareness.restype = ctypes.c_long
+        set_awareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
+    except (AttributeError, OSError, OverflowError):
+        pass
+
+
+_enable_windows_dpi_awareness()
+
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
