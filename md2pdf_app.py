@@ -274,13 +274,103 @@ class MD2PDFStudioApp:
     def _effective_display_scale(self):
         return (self._current_dpi / 96.0) * (self.zoom_percent / 100.0)
 
+    def _snapshot_view_state(self):
+        snapshot = self._snapshot_document()
+        snapshot.update(
+            {
+                "md_path": self.md_path,
+                "dirty": self.dirty,
+                "last_output_pdf": self.last_output_pdf,
+                "mode": self.mode_var.get() if hasattr(self, "mode_var") else "auto",
+                "auto_detect": self.auto_detect_var.get()
+                if hasattr(self, "auto_detect_var")
+                else True,
+                "output": self.output_var.get()
+                if hasattr(self, "output_var")
+                else "",
+                "margin": self.margin_var.get()
+                if hasattr(self, "margin_var")
+                else "14mm",
+                "open_pdf": self.open_pdf_var.get()
+                if hasattr(self, "open_pdf_var")
+                else True,
+                "environment_expanded": bool(self.environment_expanded),
+            }
+        )
+        return snapshot
+
+    def _restore_view_state(self, snapshot):
+        self.md_path = snapshot.get("md_path")
+        self.dirty = bool(snapshot.get("dirty", False))
+        self.last_output_pdf = snapshot.get("last_output_pdf")
+
+        if hasattr(self, "mode_var"):
+            self.mode_var.set(snapshot.get("mode", "auto"))
+        if hasattr(self, "auto_detect_var"):
+            self.auto_detect_var.set(bool(snapshot.get("auto_detect", True)))
+        if hasattr(self, "output_var"):
+            self.output_var.set(snapshot.get("output", ""))
+        if hasattr(self, "margin_var"):
+            self.margin_var.set(snapshot.get("margin", "14mm"))
+        if hasattr(self, "open_pdf_var"):
+            self.open_pdf_var.set(bool(snapshot.get("open_pdf", True)))
+
+        self._restore_document(snapshot)
+
+        if hasattr(self, "open_folder_btn"):
+            enabled = bool(
+                self.last_output_pdf and os.path.exists(self.last_output_pdf)
+            )
+            self.open_folder_btn.config(
+                state="normal" if enabled else "disabled"
+            )
+
+        if hasattr(self, "environment_expanded"):
+            self.environment_expanded = bool(
+                snapshot.get("environment_expanded", False)
+            )
+            if hasattr(self, "environment_button"):
+                self.environment_button.config(
+                    text="Hide" if self.environment_expanded else "Show"
+                )
+            if hasattr(self, "environment_frame"):
+                if self.environment_expanded:
+                    self.environment_frame.pack(fill="x", pady=(7, 0))
+                else:
+                    self.environment_frame.pack_forget()
+
+    def _rebuild_scaled_ui(self):
+        snapshot = self._snapshot_view_state()
+        self._cancel_scheduled_callbacks()
+
+        if self._dpi_after_id is not None:
+            try:
+                self.root.after_cancel(self._dpi_after_id)
+            except tk.TclError:
+                pass
+            self._dpi_after_id = None
+
+        if hasattr(self, "ui_container"):
+            self.ui_container.destroy()
+
+        self._configure_display_scaling()
+        self._configure_window()
+        self._configure_styles()
+        self._build_ui()
+        self._restore_view_state(snapshot)
+        self._update_document_state()
+        self._update_editor_metrics()
+        self._update_cursor_status()
+        self._run_auto_detect()
+        self._start_dpi_monitor()
+
     def set_zoom(self, value):
         target = self._clamp_zoom(value)
         if target == self.zoom_percent:
             return
+
         self.zoom_percent = target
-        self._configure_display_scaling()
-        self._update_scale_indicators()
+        self._rebuild_scaled_ui()
         self._save_preferences()
 
     def zoom_in(self):
@@ -386,22 +476,8 @@ class MD2PDFStudioApp:
         if accent is not None:
             self.accent_name = accent
 
-        snapshot = self._snapshot_document()
-        self._cancel_scheduled_callbacks()
-
-        if hasattr(self, "ui_container"):
-            self.ui_container.destroy()
-
-        self.root.configure(bg=self._colors()["root"])
-        self._configure_styles()
-        self._build_ui()
-
-        self._restore_document(snapshot)
+        self._rebuild_scaled_ui()
         self._save_preferences()
-        self._update_document_state()
-        self._update_editor_metrics()
-        self._update_cursor_status()
-        self._run_auto_detect()
 
     def toggle_theme(self):
         self._apply_visual_preferences(theme="light" if self.theme_mode == "dark" else "dark")
@@ -643,7 +719,7 @@ class MD2PDFStudioApp:
             self.reset_zoom,
         ).pack(side="left", padx=(0, 7))
 
-        theme_name = "Light" if self.theme_mode == "dark" else "Dark"
+        theme_name = "Switch to Light" if self.theme_mode == "dark" else "Switch to Dark"
         self._button(
             controls,
             theme_name,
@@ -1717,7 +1793,7 @@ class MD2PDFStudioApp:
         c = self._colors()
         if hasattr(self, "zoom_label"):
             self.zoom_label.config(
-                text=f"{self.zoom_percent}%",
+                text=f"UI {self.zoom_percent}%",
                 bg=c["surface_3"],
                 fg=c["text"],
             )
@@ -1798,7 +1874,6 @@ class MD2PDFStudioApp:
 def main():
     _enable_windows_thread_dpi_awareness()
     root = tk.Tk()
-    _enable_windows_thread_dpi_awareness()
     app = MD2PDFStudioApp(root)
     root.mainloop()
 
