@@ -1098,12 +1098,12 @@ class MD2PDFStudioApp:
         # Snapshot all Tk state before handing work to the background thread.
         theme = "dark" if mode == "sidebar_dark" else "light"
         open_pdf_after = bool(self.open_pdf_var.get())
-        renderer = {
+        renderer = "Smart Detect" if mode == "auto" else {
             "sidebar_dark": "Sidebar Dark",
             "sidebar_light": "Sidebar Light",
             "latex": "LaTeX",
             "simple": "Simple",
-        }[mode]
+        }.get(mode, mode)
 
         self._conversion_in_progress = True
         self.convert_btn.config(state="disabled")
@@ -1124,27 +1124,45 @@ class MD2PDFStudioApp:
     def _convert_worker(self, md_content, save_path, margin, mode, theme, open_pdf_after):
         start_time = time.time()
         try:
-            if mode in ("sidebar_dark", "sidebar_light"):
+            if mode == "auto":
+                backend = convert_auto(
+                    md_content,
+                    save_path,
+                    margin=margin,
+                    theme=theme,
+                )
+            elif mode in ("sidebar_dark", "sidebar_light"):
                 convert_sidebar(md_content, save_path, margin=margin, theme=theme)
+                backend = "sidebar"
             elif mode == "latex":
                 convert_latex(md_content, save_path, margin=margin)
-            else:
+                backend = "latex"
+            elif mode == "simple":
                 convert_simple(md_content, save_path, margin=margin)
+                backend = "simple"
+            else:
+                raise ValueError(f"Unsupported renderer: {mode}")
 
             file_size_kb = os.path.getsize(save_path) / 1024
             elapsed = time.time() - start_time
-            self._conversion_queue.put({
-                "ok": True,
-                "save_path": save_path,
-                "elapsed": elapsed,
-                "file_size_kb": file_size_kb,
-                "open_pdf": open_pdf_after,
-            })
+            self._conversion_queue.put(
+                {
+                    "ok": True,
+                    "save_path": save_path,
+                    "elapsed": elapsed,
+                    "file_size_kb": file_size_kb,
+                    "open_pdf": open_pdf_after,
+                    "mode": mode,
+                    "backend": backend,
+                }
+            )
         except Exception as exc:
-            self._conversion_queue.put({
-                "ok": False,
-                "error": str(exc),
-            })
+            self._conversion_queue.put(
+                {
+                    "ok": False,
+                    "error": str(exc),
+                }
+            )
 
     def _poll_conversion(self):
         try:
@@ -1163,7 +1181,7 @@ class MD2PDFStudioApp:
         if not result["ok"]:
             error = result["error"]
             self.status.config(
-                text=f"❌ Export failed: {error[:100]}",
+                text=f"Export failed: {error[:100]}",
                 fg=THEME["accent_rose"],
             )
             messagebox.showerror("Export Failed", error)
@@ -1176,8 +1194,16 @@ class MD2PDFStudioApp:
 
         self.last_output_pdf = save_path
         self.open_folder_btn.config(state="normal")
+
+        backend_names = {
+            "sidebar": "Sidebar",
+            "latex": "LaTeX",
+            "simple": "Simple",
+        }
+        backend = backend_names.get(result.get("backend"), result.get("backend", "PDF"))
+
         self.status.config(
-            text=f"✅ Exported in {elapsed:.1f}s: {os.path.basename(save_path)} ({size_str})",
+            text=f"PDF ready · {os.path.basename(save_path)} · {backend} · {size_str} · {elapsed:.1f}s",
             fg=THEME["accent_emerald"],
         )
 
