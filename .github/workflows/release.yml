@@ -76,6 +76,14 @@ jobs:
           }
 
           Write-Host "Verified PerMonitorV2 manifest in $exe"
+
+          $process = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 4
+          if ($process.HasExited) {
+            throw "Windows Studio exited during startup with code $($process.ExitCode)."
+          }
+          Stop-Process -Id $process.Id -Force
+          Write-Host "Verified Windows Studio startup."
       - name: Package Windows bundle
         shell: pwsh
         run: |
