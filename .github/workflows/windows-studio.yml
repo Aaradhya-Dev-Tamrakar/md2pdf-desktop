@@ -33,7 +33,7 @@ jobs:
             throw "Windows executable was not produced."
           }
 
-          $sdkTools = Get-ChildItem -Path "$env:ProgramFiles(x86)\Windows Kits\10\bin", "$env:ProgramFiles\Windows Kits\10\bin" -Recurse -Filter "mt.exe" -ErrorAction SilentlyContinue | Sort-Object FullName -Descending
+          $sdkTools = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin", "${env:ProgramFiles}\Windows Kits\10\bin" -Recurse -Filter "mt.exe" -ErrorAction SilentlyContinue | Sort-Object FullName -Descending
 
           if (-not $sdkTools) {
             throw "Windows SDK mt.exe was not found; cannot validate the embedded manifest."
