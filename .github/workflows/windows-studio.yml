@@ -1,0 +1,61 @@
+name: Windows Studio Build
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-studio:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install application and packaging dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check .
+          python -m pip install --disable-pip-version-check "pyinstaller==6.22.3"
+      - name: Build Windows Studio bundle
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean packaging/windows/md2pdf-studio.spec
+      - name: Verify executable and embedded DPI manifest
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path "dist/md2pdf-studio/md2pdf-studio.exe"
+          if (-not (Test-Path $exe)) {
+            throw "Windows executable was not produced."
+          }
+
+          $sdkTools = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin", "${env:ProgramFiles}\Windows Kits\10\bin" -Recurse -Filter "mt.exe" -ErrorAction SilentlyContinue | Sort-Object FullName -Descending
+
+          if (-not $sdkTools) {
+            throw "Windows SDK mt.exe was not found; cannot validate the embedded manifest."
+          }
+
+          $manifestPath = Join-Path $env:RUNNER_TEMP "md2pdf-studio.manifest.xml"
+          & $sdkTools[0].FullName -nologo -inputresource:"$exe;#1" -out:"$manifestPath"
+          if ($LASTEXITCODE -ne 0) {
+            throw "mt.exe could not extract the executable manifest."
+          }
+
+          $manifest = Get-Content $manifestPath -Raw
+          if ($manifest -notmatch "PerMonitorV2") {
+            throw "Embedded manifest does not declare PerMonitorV2."
+          }
+
+          Write-Host "Verified PerMonitorV2 manifest in $exe"
+
+          $process = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 4
+          if ($process.HasExited) {
+            throw "Windows Studio exited during startup with code $($process.ExitCode)."
+          }
+          Stop-Process -Id $process.Id -Force
+          Write-Host "Verified Windows Studio startup."

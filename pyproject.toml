@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "md2pdf-desktop"
-version = "0.3.0"
+version = "0.4.0"
 description = "Release-quality technical Markdown-to-PDF conversion with desktop, CLI, and MCP interfaces"
 readme = "README.md"
 requires-python = ">=3.10"

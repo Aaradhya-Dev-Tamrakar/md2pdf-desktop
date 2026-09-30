@@ -77,10 +77,14 @@ Set `MD2PDF_OFFLINE=1` to make Sidebar conversion cache-only. The cache is store
 
 ## 🎨 Desktop Studio GUI (`md2pdf_app.py`)
 
-Run the desktop application:
+Run the desktop application from source:
 ```powershell
 python md2pdf_app.py
 ```
+
+### Windows release bundle
+
+Tagged releases publish a self-contained Windows x64 `md2pdf Studio` application bundle built with PyInstaller. The executable embeds the Windows Per-Monitor V2 DPI declaration so the packaged process has a release-grade DPI default instead of inheriting `python.exe`'s process DPI state. Native conversion tools such as Pandoc, Chrome/Edge, LaTeX, and wkhtmltopdf are still discovered from the host system.
 
 ### Studio Highlights
 - **`ui-ux-pro-max` Dark Palette**: Deep canvas (`#080c16`), elevated card containers (`#0f172a`), subtle slate borders (`#1e293b`), and vibrant accents.
@@ -183,9 +187,9 @@ The repository includes a dedicated sync engine enforcing pre-commit secret scan
 
 ## 🚢 Release-quality validation
 
-The Phase 3 release candidate is version `0.3.0`. Release validation covers the Python 3.10–3.12 matrix, wheel + source-distribution contents, installed CLI smoke tests, real `Pandoc → wkhtmltopdf` rendering, real offline Sidebar/Chromium rendering, semantic PDF parsing through `pypdf`, and a maintained rendering corpus. See [`docs/RELEASE_CHECKLIST.md`](./docs/RELEASE_CHECKLIST.md).
+The current release target is version `0.4.0`. Release validation covers the Python 3.10–3.12 matrix, wheel + source-distribution contents, installed CLI smoke tests, real `Pandoc → wkhtmltopdf` rendering, real offline Sidebar/Chromium rendering, semantic PDF parsing through `pypdf`, and a maintained rendering corpus. See [`docs/RELEASE_CHECKLIST.md`](./docs/RELEASE_CHECKLIST.md).
 
-Release artifacts are built by [`release.yml`](./.github/workflows/release.yml) when a `v*` tag is pushed. The project does not bundle Pandoc, Chromium, TeX, or wkhtmltopdf; these remain documented system dependencies.
+Release artifacts are built by [`release.yml`](./.github/workflows/release.yml) when a `v*` tag is pushed. Releases include the Python source distribution/wheel and a Windows x64 `md2pdf Studio` desktop bundle. The Windows executable embeds a Per-Monitor V2 application manifest; the project still does not bundle Pandoc, Chromium, TeX, or wkhtmltopdf, which remain documented system dependencies.
 
 ## 🧪 Reliability checks
 
