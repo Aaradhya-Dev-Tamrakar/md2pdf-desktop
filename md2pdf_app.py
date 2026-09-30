@@ -14,6 +14,55 @@ import subprocess
 import sys
 import threading
 import time
+import ctypes
+
+
+# ---------------------------------------------------------------------------
+# Windows DPI Awareness
+# ---------------------------------------------------------------------------
+# Keep Tk from being bitmap-scaled by Windows on high-DPI displays. This must
+# run before creating the Tk root window (and before importing tkinter).
+def _enable_windows_dpi_awareness():
+    """Enable per-monitor DPI awareness before Tkinter is imported.
+
+    Windows APIs can report failure by returning False/an HRESULT rather than
+    raising an exception, so check their return values before choosing a
+    fallback.
+    """
+    if sys.platform != "win32":
+        return
+
+    try:
+        set_context = ctypes.windll.user32.SetProcessDpiAwarenessContext
+        set_context.argtypes = [ctypes.c_void_p]
+        set_context.restype = ctypes.c_bool
+
+        # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 is the pseudo-handle -4.
+        if set_context(ctypes.c_void_p(-4)):
+            return
+    except (AttributeError, OSError):
+        pass
+
+    try:
+        # Windows 8.1 fallback: 0=unaware, 1=system-aware, 2=per-monitor-aware.
+        set_awareness = ctypes.windll.shcore.SetProcessDpiAwareness
+        set_awareness.argtypes = [ctypes.c_int]
+        set_awareness.restype = ctypes.c_long
+        if set_awareness(2) == 0:  # S_OK
+            return
+    except (AttributeError, OSError):
+        pass
+
+    try:
+        # Last-resort fallback for older Windows: system-DPI aware (not
+        # per-monitor), which is still preferable to bitmap-scaled unaware UI.
+        ctypes.windll.user32.SetProcessDPIAware()
+    except (AttributeError, OSError):
+        pass
+
+
+_enable_windows_dpi_awareness()
+
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
