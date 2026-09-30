@@ -4,18 +4,9 @@ on:
   push:
     tags:
       - "v*"
-    branches:
-      - "release/v0.4.0"
 
 permissions:
   contents: write
-
-# Temporary bootstrap support for the first v0.4.0 publication.
-# The release branch is only a trigger; artifacts are built from this clean
-# main commit so the trigger commit is never included in the v0.4.0 tag.
-env:
-  RELEASE_TAG: ${{ github.ref_type == 'branch' && 'v0.4.0' || github.ref_name }}
-  RELEASE_TARGET: ${{ github.ref_type == 'branch' && '99b9fc739bb68f7ede67ff9759cb1c7770c6bb1b' || github.sha }}
 
 jobs:
   build-python:
@@ -23,8 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_TARGET }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -50,8 +39,6 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_TARGET }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -113,8 +100,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_TARGET }}
       - name: Download Python artifacts
         uses: actions/download-artifact@v4
         with:
@@ -129,6 +114,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ env.RELEASE_TAG }}" dist/* \
-            --target "${{ env.RELEASE_TARGET }}" \
-            --generate-notes
+          gh release create "${{ github.ref_name }}" dist/* \
+            --generate-notes \
+            --verify-tag
