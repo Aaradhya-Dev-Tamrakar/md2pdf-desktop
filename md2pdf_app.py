@@ -130,26 +130,302 @@ THEME = {
 
 
 class MD2PDFStudioApp:
+    """Desktop workspace for Markdown → PDF conversion."""
+
+    ZOOM_STEPS = (80, 90, 100, 110, 120, 130, 140, 150)
+
     def __init__(self, root):
         self.root = root
-        self.root.title("md2pdf Studio — Markdown to Vector PDF")
-        screen_w = self.root.winfo_screenwidth()
-        screen_h = self.root.winfo_screenheight()
-        width = min(1180, max(900, int(screen_w * 0.84)))
-        height = min(800, max(650, int(screen_h * 0.84)))
-        self.root.geometry(f"{width}x{height}")
-        self.root.minsize(900, 620)
-        self.root.configure(bg=THEME["bg_root"])
+        self.preferences_path = self._get_preferences_path()
+
+        prefs = self._load_preferences()
+        self.theme_mode = prefs.get("theme", "dark")
+        self.accent_name = prefs.get("accent", "blue")
+        self.zoom_percent = self._clamp_zoom(prefs.get("zoom", 100))
+
+        self.root.title("md2pdf Studio")
+        self.root.configure(bg="#0b0c0e")
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self.md_path = None
         self.last_output_pdf = None
+        self.dirty = False
         self._conversion_in_progress = False
         self._conversion_queue = queue.Queue()
         self._conversion_after_id = None
+        self._detect_after_id = None
+        self._dpi_after_id = None
+        self._current_dpi = 96
+        self._build_snapshot = None
 
+        self._configure_display_scaling(initial=True)
+        self._configure_window()
         self._check_deps()
         self._configure_styles()
         self._build_ui()
+        self._bind_shortcuts()
+        self._update_document_state()
+        self._update_editor_metrics()
+        self._update_cursor_status()
+        self._run_auto_detect()
+        self._start_dpi_monitor()
+
+    # ------------------------------------------------------------------
+    # Preferences / scaling
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _clamp_zoom(value):
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            value = 100
+        return min(MD2PDFStudioApp.ZOOM_STEPS, key=lambda x: abs(x - value))
+
+    @staticmethod
+    def _preferred_tk_scaling(dpi):
+        """Return Tk's pixels-per-point scale for a physical display DPI."""
+        try:
+            dpi = float(dpi)
+        except (TypeError, ValueError):
+            dpi = 96.0
+        dpi = max(72.0, min(384.0, dpi))
+        return (96.0 / 72.0) * (dpi / 96.0)
+
+    @staticmethod
+    def _get_preferences_path():
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "md2pdf-studio", "preferences.json")
+
+    def _load_preferences(self):
+        try:
+            with open(self.preferences_path, "r", encoding="utf-8") as handle:
+                data = __import__("json").load(handle)
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError, TypeError):
+            return {}
+
+    def _save_preferences(self):
+        try:
+            directory = os.path.dirname(self.preferences_path)
+            os.makedirs(directory, exist_ok=True)
+            with open(self.preferences_path, "w", encoding="utf-8") as handle:
+                __import__("json").dump(
+                    {
+                        "theme": self.theme_mode,
+                        "accent": self.accent_name,
+                        "zoom": self.zoom_percent,
+                    },
+                    handle,
+                    indent=2,
+                )
+        except OSError:
+            pass
+
+    def _get_window_dpi(self):
+        if sys.platform == "win32":
+            try:
+                dpi = int(ctypes.windll.user32.GetDpiForWindow(self.root.winfo_id()))
+                if dpi > 0:
+                    return dpi
+            except (AttributeError, OSError, TypeError, ValueError):
+                pass
+
+        try:
+            dpi = int(round(float(self.root.winfo_fpixels("1i"))))
+            if dpi > 0:
+                return dpi
+        except (tk.TclError, ValueError, TypeError):
+            pass
+        return 96
+
+    def _configure_display_scaling(self, initial=False):
+        dpi = self._get_window_dpi() if not initial else 96
+        if initial and sys.platform == "win32":
+            try:
+                dpi = int(ctypes.windll.user32.GetDpiForSystem())
+            except (AttributeError, OSError, TypeError, ValueError):
+                dpi = 96
+
+        self._current_dpi = dpi or 96
+        base = self._preferred_tk_scaling(self._current_dpi)
+        scale = base * (self.zoom_percent / 100.0)
+
+        try:
+            self.root.tk.call("tk", "scaling", scale)
+        except tk.TclError:
+            pass
+
+    def _start_dpi_monitor(self):
+        self._check_for_dpi_change()
+        self._dpi_after_id = self.root.after(1200, self._start_dpi_monitor)
+
+    def _check_for_dpi_change(self):
+        try:
+            dpi = self._get_window_dpi()
+        except tk.TclError:
+            return
+
+        if dpi and abs(dpi - self._current_dpi) >= 8:
+            self._current_dpi = dpi
+            self._configure_display_scaling()
+            self._update_scale_indicators()
+
+    def _effective_display_scale(self):
+        return (self._current_dpi / 96.0) * (self.zoom_percent / 100.0)
+
+    def set_zoom(self, value):
+        target = self._clamp_zoom(value)
+        if target == self.zoom_percent:
+            return
+        self.zoom_percent = target
+        self._configure_display_scaling()
+        self._update_scale_indicators()
+        self._save_preferences()
+
+    def zoom_in(self):
+        current = self.ZOOM_STEPS.index(self.zoom_percent)
+        if current < len(self.ZOOM_STEPS) - 1:
+            self.set_zoom(self.ZOOM_STEPS[current + 1])
+
+    def zoom_out(self):
+        current = self.ZOOM_STEPS.index(self.zoom_percent)
+        if current > 0:
+            self.set_zoom(self.ZOOM_STEPS[current - 1])
+
+    def reset_zoom(self):
+        self.set_zoom(100)
+
+    # ------------------------------------------------------------------
+    # Theme system
+    # ------------------------------------------------------------------
+
+    ACCENTS = {
+        "blue": {
+            "accent": "#2563eb",
+            "accent_hover": "#3b82f6",
+            "accent_soft_light": "#e8efff",
+            "accent_soft_dark": "#172744",
+        },
+        "violet": {
+            "accent": "#7c3aed",
+            "accent_hover": "#8b5cf6",
+            "accent_soft_light": "#f0e9ff",
+            "accent_soft_dark": "#281c45",
+        },
+        "teal": {
+            "accent": "#0f766e",
+            "accent_hover": "#14b8a6",
+            "accent_soft_light": "#e4f7f4",
+            "accent_soft_dark": "#123936",
+        },
+        "emerald": {
+            "accent": "#047857",
+            "accent_hover": "#10b981",
+            "accent_soft_light": "#e7f7f1",
+            "accent_soft_dark": "#12382e",
+        },
+        "rose": {
+            "accent": "#be123c",
+            "accent_hover": "#e11d48",
+            "accent_soft_light": "#fff0f3",
+            "accent_soft_dark": "#411a26",
+        },
+        "amber": {
+            "accent": "#b45309",
+            "accent_hover": "#d97706",
+            "accent_soft_light": "#fff4df",
+            "accent_soft_dark": "#402b14",
+        },
+    }
+
+    BASE_THEMES = {
+        "dark": {
+            "root": "#090a0c",
+            "surface": "#111315",
+            "surface_2": "#17191c",
+            "surface_3": "#1d2024",
+            "input": "#0c0e10",
+            "text": "#f4f5f7",
+            "text_2": "#c1c6ce",
+            "text_3": "#7d848e",
+            "border": "#282d33",
+            "border_soft": "#20242a",
+            "success": "#34d399",
+            "warning": "#f5b84b",
+            "danger": "#fb7185",
+        },
+        "light": {
+            "root": "#f3f4f6",
+            "surface": "#ffffff",
+            "surface_2": "#f7f8fa",
+            "surface_3": "#eceff2",
+            "input": "#fbfbfc",
+            "text": "#111315",
+            "text_2": "#454b53",
+            "text_3": "#7b828b",
+            "border": "#dfe3e7",
+            "border_soft": "#e9ecef",
+            "success": "#047857",
+            "warning": "#b45309",
+            "danger": "#be123c",
+        },
+    }
+
+    def _colors(self):
+        colors = dict(self.BASE_THEMES.get(self.theme_mode, self.BASE_THEMES["dark"]))
+        colors.update(self.ACCENTS.get(self.accent_name, self.ACCENTS["blue"]))
+        colors["selected"] = colors["accent_soft_dark" if self.theme_mode == "dark" else "accent_soft_light"]
+        colors["editor_line"] = "#14171b" if self.theme_mode == "dark" else "#f3f5f7"
+        colors["control_text"] = colors["text_2"]
+        return colors
+
+    def _apply_visual_preferences(self, theme=None, accent=None):
+        if theme is not None:
+            self.theme_mode = theme
+        if accent is not None:
+            self.accent_name = accent
+
+        snapshot = self._snapshot_document()
+        self._cancel_scheduled_callbacks()
+
+        if hasattr(self, "ui_container"):
+            self.ui_container.destroy()
+
+        self.root.configure(bg=self._colors()["root"])
+        self._configure_styles()
+        self._build_ui()
+
+        self._restore_document(snapshot)
+        self._save_preferences()
+        self._update_document_state()
+        self._update_editor_metrics()
+        self._update_cursor_status()
+        self._run_auto_detect()
+
+    def toggle_theme(self):
+        self._apply_visual_preferences(theme="light" if self.theme_mode == "dark" else "dark")
+
+    def choose_accent(self, name):
+        if name in self.ACCENTS:
+            self._apply_visual_preferences(accent=name)
+
+    # ------------------------------------------------------------------
+    # Window / dependencies / styling
+    # ------------------------------------------------------------------
+
+    def _configure_window(self):
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        width = max(1180, int(screen_w * 0.84))
+        height = max(760, int(screen_h * 0.84))
+        width = min(width, max(1180, screen_w - 48))
+        height = min(height, max(760, screen_h - 72))
+        self.root.geometry(f"{width}x{height}")
+        self.root.minsize(
+            int(980 * max(1.0, self._current_dpi / 96.0)),
+            int(650 * max(1.0, self._current_dpi / 96.0)),
+        )
 
     def _check_deps(self):
         self.have = check_tools()
@@ -164,302 +440,360 @@ class MD2PDFStudioApp:
         else:
             self.latex_ok = False
 
-        self.missing_deps = [t for t, ok in self.have.items() if not ok]
-
     def _configure_styles(self):
+        c = self._colors()
         self.style = ttk.Style()
         try:
             self.style.theme_use("clam")
-        except Exception:
+        except tk.TclError:
             pass
 
-        # Frame styles
-        self.style.configure("Root.TFrame", background=THEME["bg_root"])
-        self.style.configure("Card.TFrame", background=THEME["bg_card"], relief="flat")
-        self.style.configure("Header.TFrame", background=THEME["bg_root"])
-
-        # Label styles
         self.style.configure(
-            "Title.TLabel",
-            background=THEME["bg_root"],
-            foreground=THEME["text_primary"],
-            font=("Segoe UI", 14, "bold"),
-        )
-        self.style.configure(
-            "Subtitle.TLabel",
-            background=THEME["bg_root"],
-            foreground=THEME["text_muted"],
+            "MD.TButton",
+            background=c["surface_3"],
+            foreground=c["text"],
+            padding=(12, 7),
             font=("Segoe UI", 9),
-        )
-        self.style.configure(
-            "CardTitle.TLabel",
-            background=THEME["bg_card"],
-            foreground=THEME["text_secondary"],
-            font=("Segoe UI", 9, "bold"),
-        )
-        self.style.configure(
-            "Badge.TLabel",
-            background=THEME["bg_card"],
-            foreground=THEME["text_muted"],
-            font=("Consolas", 8),
-            padding=(4, 2),
-        )
-        self.style.configure(
-            "Status.TLabel",
-            background=THEME["bg_root"],
-            foreground=THEME["text_secondary"],
-            font=("Segoe UI", 9),
-        )
-
-        # Radio button styles
-        self.style.configure(
-            "Card.TRadiobutton",
-            background=THEME["bg_card"],
-            foreground=THEME["text_primary"],
-            font=("Segoe UI", 9, "bold"),
-            focuscolor=THEME["bg_card"],
+            borderwidth=0,
+            relief="flat",
         )
         self.style.map(
-            "Card.TRadiobutton",
-            foreground=[("active", THEME["accent_cyan"])],
-            background=[("active", THEME["bg_card"])],
+            "MD.TButton",
+            background=[("active", c["border"]), ("pressed", c["border_soft"]), ("disabled", c["surface_2"])],
+            foreground=[("disabled", c["text_3"])],
         )
 
-        # Checkbutton styles
         self.style.configure(
-            "Card.TCheckbutton",
-            background=THEME["bg_card"],
-            foreground=THEME["text_secondary"],
-            font=("Segoe UI", 9),
-            focuscolor=THEME["bg_card"],
-        )
-        self.style.map(
-            "Card.TCheckbutton",
-            foreground=[("active", THEME["text_primary"])],
-            background=[("active", THEME["bg_card"])],
-        )
-
-        # Primary Button style
-        self.style.configure(
-            "Primary.TButton",
+            "MDPrimary.TButton",
+            background=c["accent"],
+            foreground="#ffffff",
+            padding=(17, 9),
             font=("Segoe UI", 10, "bold"),
-            background=THEME["accent_blue"],
-            foreground="#ffffff",
-            padding=(16, 8),
+            borderwidth=0,
             relief="flat",
         )
         self.style.map(
-            "Primary.TButton",
-            background=[("active", "#1d4ed8"), ("pressed", "#1e40af")],
-            foreground=[("active", "#ffffff")],
+            "MDPrimary.TButton",
+            background=[("active", c["accent_hover"]), ("pressed", c["accent"]), ("disabled", c["surface_3"])],
+            foreground=[("disabled", c["text_3"])],
         )
 
-        # Secondary Button style
         self.style.configure(
-            "Secondary.TButton",
-            font=("Segoe UI", 9),
-            background=THEME["bg_card_hover"],
-            foreground=THEME["text_primary"],
-            padding=(10, 5),
-            relief="flat",
-        )
-        self.style.map(
-            "Secondary.TButton",
-            background=[("active", "#334155"), ("pressed", "#1e293b")],
-            foreground=[("active", "#ffffff")],
+            "MD.TCombobox",
+            fieldbackground=c["surface_3"],
+            background=c["surface_3"],
+            foreground=c["text"],
+            arrowcolor=c["text_2"],
+            bordercolor=c["border"],
+            lightcolor=c["border"],
+            darkcolor=c["border"],
+            padding=(7, 5),
         )
 
-        # Combobox style
         self.style.configure(
-            "Dark.TCombobox",
-            background=THEME["bg_input"],
-            foreground="#ffffff",
-            fieldbackground=THEME["bg_input"],
-            darkcolor=THEME["border"],
-            lightcolor=THEME["border"],
+            "MD.Horizontal.TProgressbar",
+            troughcolor=c["surface_3"],
+            background=c["accent"],
+            bordercolor=c["surface_3"],
+            lightcolor=c["accent"],
+            darkcolor=c["accent"],
         )
+
+    def _label(self, parent, text="", size=10, weight="normal", color=None, bg=None, **kwargs):
+        c = self._colors()
+        return tk.Label(
+            parent,
+            text=text,
+            font=("Segoe UI", size, weight),
+            fg=color or c["text"],
+            bg=bg or c["surface"],
+            **kwargs,
+        )
+
+    def _button(self, parent, text, command, primary=False, **kwargs):
+        style = "MDPrimary.TButton" if primary else "MD.TButton"
+        return ttk.Button(parent, text=text, command=command, style=style, **kwargs)
+
+    # ------------------------------------------------------------------
+    # UI
+    # ------------------------------------------------------------------
 
     def _build_ui(self):
-        # Root shell
-        shell = tk.Frame(self.root, bg=THEME["bg_root"])
-        shell.pack(fill="both", expand=True, padx=18, pady=14)
+        c = self._colors()
+        self.ui_container = tk.Frame(self.root, bg=c["root"])
+        self.ui_container.pack(fill="both", expand=True, padx=16, pady=13)
 
-        # --------------------------------------------------------------
-        # Header
-        # --------------------------------------------------------------
-        header = tk.Frame(shell, bg=THEME["bg_root"])
-        header.pack(fill="x", pady=(0, 10))
+        self._build_header()
+        self._build_command_bar()
 
-        brand = tk.Frame(header, bg=THEME["bg_root"])
-        brand.pack(side="left", fill="x", expand=True)
-
-        brand_line = tk.Frame(brand, bg=THEME["bg_root"])
-        brand_line.pack(anchor="w")
-        tk.Label(
-            brand_line,
-            text="md2pdf",
-            bg=THEME["bg_root"],
-            fg=THEME["text_primary"],
-            font=("Segoe UI", 19, "bold"),
-        ).pack(side="left")
-        tk.Label(
-            brand_line,
-            text="  STUDIO",
-            bg=THEME["bg_root"],
-            fg=THEME["accent_cyan"],
-            font=("Segoe UI", 9, "bold"),
-        ).pack(side="left", pady=(7, 0))
-
-        tk.Label(
-            brand,
-            text="Markdown → reliable PDF, without the clutter.",
-            bg=THEME["bg_root"],
-            fg=THEME["text_muted"],
-            font=("Segoe UI", 9),
-        ).pack(anchor="w", pady=(1, 0))
-
-        health = tk.Frame(header, bg=THEME["bg_root"])
-        health.pack(side="right", pady=(5, 0))
-        health_items = [
-            ("Chromium", self.sidebar_ok),
-            ("Pandoc", self.have.get("pandoc", False)),
-            ("LaTeX", self.latex_ok),
-            ("wkhtml", self.have.get("wkhtmltopdf", False)),
-        ]
-        for name, ok in health_items:
-            tk.Label(
-                health,
-                text=("● " if ok else "○ ") + name,
-                bg=THEME["bg_root"],
-                fg=THEME["accent_emerald"] if ok else THEME["text_muted"],
-                font=("Segoe UI", 8, "bold"),
-            ).pack(side="left", padx=(0, 10))
-
-        # --------------------------------------------------------------
-        # Command bar
-        # --------------------------------------------------------------
-        command = tk.Frame(
-            shell,
-            bg=THEME["bg_card"],
-            highlightbackground=THEME["border"],
-            highlightthickness=1,
-        )
-        command.pack(fill="x")
-
-        command_left = tk.Frame(command, bg=THEME["bg_card"])
-        command_left.pack(side="left", padx=7, pady=7)
-
-        ttk.Button(command_left, text="New", command=self.new_document, style="Secondary.TButton").pack(side="left", padx=3)
-        ttk.Button(command_left, text="Open", command=self.open_file, style="Secondary.TButton").pack(side="left", padx=3)
-        ttk.Button(command_left, text="Paste", command=self.paste_clipboard, style="Secondary.TButton").pack(side="left", padx=3)
-        ttk.Button(command_left, text="Clear", command=self.clear_editor, style="Secondary.TButton").pack(side="left", padx=3)
-
-        self.file_label = tk.Label(
-            command,
-            text="Scratchpad · No file loaded",
-            bg=THEME["bg_card"],
-            fg=THEME["text_secondary"],
-            font=("Segoe UI", 9, "bold"),
-            anchor="w",
-        )
-        self.file_label.pack(side="left", padx=(12, 8), fill="x", expand=True)
-
-        self.auto_detect_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(
-            command,
-            text="Smart detect",
-            variable=self.auto_detect_var,
-            command=self._run_auto_detect,
-            bg=THEME["bg_card"],
-            fg=THEME["text_secondary"],
-            activebackground=THEME["bg_card"],
-            activeforeground=THEME["text_primary"],
-            selectcolor=THEME["bg_card_hover"],
-            font=("Segoe UI", 9),
-            relief="flat",
-            bd=0,
-            highlightthickness=0,
-        ).pack(side="right", padx=(5, 8))
-
-        # --------------------------------------------------------------
-        # Main workspace: editor + export controls
-        # --------------------------------------------------------------
         workspace = tk.PanedWindow(
-            shell,
+            self.ui_container,
             orient="horizontal",
-            bg=THEME["bg_root"],
+            bg=c["root"],
             bd=0,
             sashwidth=7,
             sashrelief="flat",
             opaqueresize=True,
         )
-        workspace.pack(fill="both", expand=True, pady=(10, 10))
+        workspace.pack(fill="both", expand=True, pady=(9, 9))
 
-        # Editor panel
-        editor_card = tk.Frame(
-            workspace,
-            bg=THEME["bg_card"],
-            highlightbackground=THEME["border"],
-            highlightthickness=1,
-        )
-        workspace.add(editor_card, minsize=560)
+        editor_panel = self._build_editor_panel()
+        export_panel = self._build_export_panel()
 
-        editor_header = tk.Frame(editor_card, bg=THEME["bg_card"])
-        editor_header.pack(fill="x", padx=15, pady=(13, 7))
+        scale = self._effective_display_scale()
+        workspace.add(editor_panel, minsize=max(560, int(530 * scale)))
+        workspace.add(export_panel, minsize=max(350, int(345 * scale)))
 
-        left_meta = tk.Frame(editor_header, bg=THEME["bg_card"])
-        left_meta.pack(side="left")
+        self._build_statusbar()
+        self._update_scale_indicators()
+
+    def _build_header(self):
+        c = self._colors()
+        header = tk.Frame(self.ui_container, bg=c["root"])
+        header.pack(fill="x", pady=(0, 9))
+
+        brand = tk.Frame(header, bg=c["root"])
+        brand.pack(side="left", fill="x", expand=True)
+
+        row = tk.Frame(brand, bg=c["root"])
+        row.pack(anchor="w")
         tk.Label(
-            left_meta,
-            text="MARKDOWN SOURCE",
-            bg=THEME["bg_card"],
-            fg=THEME["text_muted"],
+            row,
+            text="md2pdf",
+            bg=c["root"],
+            fg=c["text"],
+            font=("Segoe UI", 18, "bold"),
+        ).pack(side="left")
+        tk.Label(
+            row,
+            text="  STUDIO",
+            bg=c["root"],
+            fg=c["accent"],
             font=("Segoe UI", 8, "bold"),
-        ).pack(anchor="w")
+        ).pack(side="left", pady=(7, 0))
+
         tk.Label(
-            left_meta,
-            text="Write your document",
-            bg=THEME["bg_card"],
-            fg=THEME["text_primary"],
-            font=("Segoe UI", 12, "bold"),
+            brand,
+            text="A focused Markdown workspace for reliable PDF output.",
+            bg=c["root"],
+            fg=c["text_3"],
+            font=("Segoe UI", 9),
         ).pack(anchor="w", pady=(1, 0))
 
-        editor_tools = tk.Frame(editor_header, bg=THEME["bg_card"])
-        editor_tools.pack(side="right", pady=(7, 0))
-        self.wrap_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(
-            editor_tools,
-            text="Wrap",
-            variable=self.wrap_var,
-            command=lambda: self.text.config(wrap="word" if self.wrap_var.get() else "none"),
-            bg=THEME["bg_card"],
-            fg=THEME["text_muted"],
-            activebackground=THEME["bg_card"],
-            activeforeground=THEME["text_primary"],
-            selectcolor=THEME["bg_card_hover"],
-            font=("Segoe UI", 8),
+        controls = tk.Frame(header, bg=c["root"])
+        controls.pack(side="right", pady=(3, 0))
+
+        self.dpi_label = tk.Label(
+            controls,
+            text="DPI 100%",
+            bg=c["root"],
+            fg=c["text_3"],
+            font=("Segoe UI", 8, "bold"),
+        )
+        self.dpi_label.pack(side="left", padx=(0, 9))
+
+        self.zoom_out_button = tk.Button(
+            controls,
+            text="−",
+            command=self.zoom_out,
+            width=2,
+            bg=c["surface_3"],
+            fg=c["text"],
+            activebackground=c["border"],
+            activeforeground=c["text"],
+            font=("Segoe UI", 10, "bold"),
             relief="flat",
             bd=0,
             highlightthickness=0,
-        ).pack(side="right")
+            cursor="hand2",
+        )
+        self.zoom_out_button.pack(side="left")
 
-        editor_shell = tk.Frame(
-            editor_card,
-            bg=THEME["bg_input"],
-            highlightbackground=THEME["border"],
+        self.zoom_label = tk.Label(
+            controls,
+            text="100%",
+            bg=c["surface_3"],
+            fg=c["text"],
+            font=("Segoe UI", 8, "bold"),
+            padx=8,
+            pady=5,
+        )
+        self.zoom_label.pack(side="left", padx=1)
+
+        self.zoom_in_button = tk.Button(
+            controls,
+            text="+",
+            command=self.zoom_in,
+            width=2,
+            bg=c["surface_3"],
+            fg=c["text"],
+            activebackground=c["border"],
+            activeforeground=c["text"],
+            font=("Segoe UI", 10, "bold"),
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+        )
+        self.zoom_in_button.pack(side="left", padx=(0, 8))
+
+        self._button(
+            controls,
+            "Reset",
+            self.reset_zoom,
+        ).pack(side="left", padx=(0, 7))
+
+        theme_name = "Light" if self.theme_mode == "dark" else "Dark"
+        self._button(
+            controls,
+            theme_name,
+            self.toggle_theme,
+        ).pack(side="left", padx=(0, 7))
+
+        accent_button = tk.Menubutton(
+            controls,
+            text=f"Accent · {self.accent_name.title()}",
+            bg=c["surface_3"],
+            fg=c["text"],
+            activebackground=c["border"],
+            activeforeground=c["text"],
+            font=("Segoe UI", 9),
+            relief="flat",
+            bd=0,
+            padx=10,
+            pady=6,
+            cursor="hand2",
+        )
+        accent_menu = tk.Menu(
+            accent_button,
+            tearoff=0,
+            bg=c["surface"],
+            fg=c["text"],
+            activebackground=c["accent"],
+            activeforeground="#ffffff",
+            relief="flat",
+            bd=1,
+        )
+        for name in self.ACCENTS:
+            accent_menu.add_command(
+                label=name.title(),
+                command=lambda n=name: self.choose_accent(n),
+            )
+        accent_button.configure(menu=accent_menu)
+        accent_button.pack(side="left")
+
+    def _build_command_bar(self):
+        c = self._colors()
+        bar = tk.Frame(
+            self.ui_container,
+            bg=c["surface"],
+            highlightbackground=c["border"],
             highlightthickness=1,
         )
-        editor_shell.pack(fill="both", expand=True, padx=12)
+        bar.pack(fill="x")
+
+        left = tk.Frame(bar, bg=c["surface"])
+        left.pack(side="left", padx=7, pady=7)
+        for label, command in (
+            ("New", self.new_document),
+            ("Open", self.open_file),
+            ("Paste", self.paste_clipboard),
+            ("Save", self.save_file),
+        ):
+            self._button(left, label, command).pack(side="left", padx=3)
+
+        tk.Frame(bar, width=1, bg=c["border"]).pack(side="left", fill="y", pady=8, padx=8)
+
+        self.file_label = tk.Label(
+            bar,
+            text="Scratchpad · No file loaded",
+            bg=c["surface"],
+            fg=c["text_2"],
+            font=("Segoe UI", 9, "bold"),
+            anchor="w",
+        )
+        self.file_label.pack(side="left", fill="x", expand=True)
+
+        auto_text = tk.Frame(bar, bg=c["surface"])
+        auto_text.pack(side="right", padx=(0, 9))
+        tk.Label(
+            auto_text,
+            text="Smart detect",
+            bg=c["surface"],
+            fg=c["text_2"],
+            font=("Segoe UI", 8),
+        ).pack(side="left", padx=(0, 5))
+
+        self.auto_detect_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            auto_text,
+            variable=self.auto_detect_var,
+            command=self._run_auto_detect,
+            bg=c["surface"],
+            fg=c["text"],
+            activebackground=c["surface"],
+            activeforeground=c["text"],
+            selectcolor=c["surface_3"],
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+        ).pack(side="left")
+
+    def _build_editor_panel(self):
+        c = self._colors()
+        panel = tk.Frame(
+            self.ui_container,
+            bg=c["surface"],
+            highlightbackground=c["border"],
+            highlightthickness=1,
+        )
+
+        header = tk.Frame(panel, bg=c["surface"])
+        header.pack(fill="x", padx=14, pady=(12, 7))
+
+        left = tk.Frame(header, bg=c["surface"])
+        left.pack(side="left")
+        tk.Label(
+            left,
+            text="MARKDOWN SOURCE",
+            bg=c["surface"],
+            fg=c["text_3"],
+            font=("Segoe UI", 8, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            left,
+            text="Write your document",
+            bg=c["surface"],
+            fg=c["text"],
+            font=("Segoe UI", 12, "bold"),
+        ).pack(anchor="w", pady=(1, 0))
+
+        self.document_state = tk.Label(
+            header,
+            text="Saved",
+            bg=c["surface"],
+            fg=c["success"],
+            font=("Segoe UI", 8, "bold"),
+        )
+        self.document_state.pack(side="right", pady=(6, 0))
+
+        shell = tk.Frame(
+            panel,
+            bg=c["input"],
+            highlightbackground=c["border"],
+            highlightthickness=1,
+        )
+        shell.pack(fill="both", expand=True, padx=12)
 
         self.text = scrolledtext.ScrolledText(
-            editor_shell,
+            shell,
             wrap="word",
             font=("Cascadia Mono", 11),
-            bg=THEME["bg_input"],
-            fg=THEME["text_primary"],
-            insertbackground=THEME["accent_cyan"],
-            selectbackground="#21477d",
-            selectforeground=THEME["text_primary"],
+            bg=c["input"],
+            fg=c["text"],
+            insertbackground=c["accent"],
+            selectbackground=c["accent"],
+            selectforeground="#ffffff",
             padx=17,
             pady=15,
             bd=0,
@@ -469,22 +803,19 @@ class MD2PDFStudioApp:
             maxundo=-1,
         )
         self.text.pack(fill="both", expand=True)
-
-        self.text.tag_configure(
-            "current_line",
-            background="#0f1b2c",
-        )
+        self.text.tag_configure("current_line", background=c["editor_line"])
 
         self.editor_placeholder = tk.Label(
-            editor_shell,
+            shell,
             text=(
                 "Start with Markdown\n\n"
                 "# Your title\n"
                 "Write normally — headings, tables, code, math, Mermaid and alerts are supported.\n\n"
-                "Tip: use Ctrl+O to open a .md file."
+                "Ctrl+O  Open    Ctrl+S  Save    Ctrl+Shift+E  Export\n"
+                "Ctrl+Plus / Ctrl+Minus  Zoom"
             ),
-            bg=THEME["bg_input"],
-            fg=THEME["text_muted"],
+            bg=c["input"],
+            fg=c["text_3"],
             font=("Segoe UI", 10),
             justify="left",
             anchor="nw",
@@ -494,252 +825,265 @@ class MD2PDFStudioApp:
         self.editor_placeholder.place(x=0, y=0, relwidth=1, relheight=1)
         self.editor_placeholder.bind("<Button-1>", lambda _e: self.text.focus_set())
 
-        editor_footer = tk.Frame(editor_card, bg=THEME["bg_card"])
-        editor_footer.pack(fill="x", padx=15, pady=(7, 11))
+        footer = tk.Frame(panel, bg=c["surface"])
+        footer.pack(fill="x", padx=14, pady=(7, 10))
+
         self.stats_bar = tk.Label(
-            editor_footer,
-            text="Lines: 0  ·  Words: 0  ·  Characters: 0",
-            bg=THEME["bg_card"],
-            fg=THEME["text_muted"],
+            footer,
+            text="Lines 0  ·  Words 0  ·  Characters 0",
+            bg=c["surface"],
+            fg=c["text_3"],
             font=("Segoe UI", 8),
         )
         self.stats_bar.pack(side="left")
+
         self.cursor_label = tk.Label(
-            editor_footer,
+            footer,
             text="Ln 1, Col 1",
-            bg=THEME["bg_card"],
-            fg=THEME["text_muted"],
+            bg=c["surface"],
+            fg=c["text_3"],
             font=("Segoe UI", 8),
         )
         self.cursor_label.pack(side="right")
 
         self.text.bind("<<Modified>>", self._on_text_modified)
-        self.text.bind("<KeyRelease>", self._editor_event)
-        self.text.bind("<ButtonRelease>", self._editor_event)
+        self.text.bind("<KeyRelease>", self._on_editor_event)
+        self.text.bind("<ButtonRelease>", self._on_editor_event)
+        self.text.bind("<Control-MouseWheel>", self._on_control_wheel)
         self.text.edit_modified(False)
 
-        # Export panel
-        side = tk.Frame(
-            workspace,
-            bg=THEME["bg_card"],
-            highlightbackground=THEME["border"],
-            highlightthickness=1,
-            width=350,
-        )
-        workspace.add(side, minsize=330)
+        return panel
 
-        side_body = tk.Frame(side, bg=THEME["bg_card"])
-        side_body.pack(fill="both", expand=True, padx=15, pady=15)
+    def _build_export_panel(self):
+        c = self._colors()
+        panel = tk.Frame(
+            self.ui_container,
+            bg=c["surface"],
+            highlightbackground=c["border"],
+            highlightthickness=1,
+        )
+
+        body = tk.Frame(panel, bg=c["surface"])
+        body.pack(fill="both", expand=True, padx=15, pady=14)
 
         tk.Label(
-            side_body,
+            body,
             text="EXPORT",
-            bg=THEME["bg_card"],
-            fg=THEME["text_muted"],
+            bg=c["surface"],
+            fg=c["text_3"],
             font=("Segoe UI", 8, "bold"),
         ).pack(anchor="w")
         tk.Label(
-            side_body,
+            body,
             text="PDF profile",
-            bg=THEME["bg_card"],
-            fg=THEME["text_primary"],
+            bg=c["surface"],
+            fg=c["text"],
             font=("Segoe UI", 14, "bold"),
         ).pack(anchor="w", pady=(1, 2))
         tk.Label(
-            side_body,
-            text="Use Smart Detect for most documents, or choose a renderer explicitly.",
-            bg=THEME["bg_card"],
-            fg=THEME["text_muted"],
+            body,
+            text="Smart Detect handles most documents automatically. Manual renderers remain available below.",
+            bg=c["surface"],
+            fg=c["text_3"],
             font=("Segoe UI", 8),
-            wraplength=305,
+            wraplength=320,
             justify="left",
-        ).pack(anchor="w", pady=(0, 11))
+        ).pack(anchor="w", pady=(0, 10))
 
         smart = tk.Frame(
-            side_body,
-            bg=THEME["bg_card_hover"],
-            highlightbackground=THEME["accent_cyan"],
+            body,
+            bg=c["selected"],
+            highlightbackground=c["accent"],
             highlightthickness=1,
         )
         smart.pack(fill="x")
-        self.mode_var = tk.StringVar(value="auto")
 
+        self.mode_var = tk.StringVar(value="auto")
         tk.Radiobutton(
             smart,
             variable=self.mode_var,
             value="auto",
-            command=self._render_mode_cards,
-            bg=THEME["bg_card_hover"],
-            activebackground=THEME["bg_card_hover"],
-            selectcolor=THEME["accent_blue"],
+            command=self._run_auto_detect,
+            bg=c["selected"],
+            activebackground=c["selected"],
+            selectcolor=c["accent"],
             relief="flat",
             bd=0,
             highlightthickness=0,
-        ).pack(side="left", padx=(10, 2), pady=10)
+        ).pack(side="left", padx=(9, 2), pady=9)
 
-        smart_copy = tk.Frame(smart, bg=THEME["bg_card_hover"])
-        smart_copy.pack(side="left", fill="x", expand=True, padx=(2, 10), pady=9)
+        copy = tk.Frame(smart, bg=c["selected"])
+        copy.pack(side="left", fill="x", expand=True, padx=(1, 9), pady=8)
+
         tk.Label(
-            smart_copy,
+            copy,
             text="Smart Detect",
-            bg=THEME["bg_card_hover"],
-            fg=THEME["text_primary"],
-            font=("Segoe UI", 10, "bold"),
+            bg=c["selected"],
+            fg=c["text"],
+            font=("Segoe UI", 9, "bold"),
         ).pack(anchor="w")
+
         self.detect_label = tk.Label(
-            smart_copy,
+            copy,
             text="Ready to inspect the document.",
-            bg=THEME["bg_card_hover"],
-            fg=THEME["accent_cyan"],
+            bg=c["selected"],
+            fg=c["accent_hover"],
             font=("Segoe UI", 8),
-            wraplength=260,
+            wraplength=290,
             justify="left",
         )
-        self.detect_label.pack(anchor="w", pady=(3, 0))
+        self.detect_label.pack(anchor="w", pady=(2, 0))
 
         tk.Label(
-            side_body,
+            body,
             text="RENDERER",
-            bg=THEME["bg_card"],
-            fg=THEME["text_muted"],
+            bg=c["surface"],
+            fg=c["text_3"],
             font=("Segoe UI", 8, "bold"),
-        ).pack(anchor="w", pady=(14, 7))
+        ).pack(anchor="w", pady=(13, 6))
 
-        cards = tk.Frame(side_body, bg=THEME["bg_card"])
+        cards = tk.Frame(body, bg=c["surface"])
         cards.pack(fill="x")
         cards.columnconfigure(0, weight=1)
         cards.columnconfigure(1, weight=1)
 
         self._mode_cards = {}
-        self._mode_card_labels = {}
         renderer_info = [
             ("sidebar_light", "Sidebar Light", "Print layout", self.sidebar_ok),
-            ("sidebar_dark", "Sidebar Dark", "IDE-style output", self.sidebar_ok),
-            ("latex", "LaTeX Formal", "Academic typesetting", self.latex_ok),
-            ("simple", "Simple", "HTML PDF fallback", self.simple_ok),
+            ("sidebar_dark", "Sidebar Dark", "Dark output", self.sidebar_ok),
+            ("latex", "LaTeX Formal", "Academic", self.latex_ok),
+            ("simple", "Simple", "HTML fallback", self.simple_ok),
         ]
         for i, (value, title, desc, available) in enumerate(renderer_info):
             card = tk.Frame(
                 cards,
-                bg=THEME["bg_input"],
-                highlightbackground=THEME["border"],
+                bg=c["input"],
+                highlightbackground=c["border"],
                 highlightthickness=1,
                 cursor="hand2" if available else "arrow",
             )
             card.grid(row=i // 2, column=i % 2, sticky="nsew", padx=3, pady=3)
-            card.columnconfigure(0, weight=1)
             self._mode_cards[value] = card
 
-            row = tk.Frame(card, bg=THEME["bg_input"])
-            row.pack(fill="x", padx=9, pady=(8, 2))
+            title_row = tk.Frame(card, bg=c["input"])
+            title_row.pack(fill="x", padx=8, pady=(8, 2))
             title_label = tk.Label(
-                row,
+                title_row,
                 text=title,
-                bg=THEME["bg_input"],
-                fg=THEME["text_primary"] if available else THEME["text_muted"],
+                bg=c["input"],
+                fg=c["text"] if available else c["text_3"],
                 font=("Segoe UI", 8, "bold"),
             )
             title_label.pack(side="left")
             tk.Label(
-                row,
+                title_row,
                 text="●" if available else "○",
-                bg=THEME["bg_input"],
-                fg=THEME["accent_emerald"] if available else THEME["text_muted"],
+                bg=c["input"],
+                fg=c["success"] if available else c["text_3"],
                 font=("Segoe UI", 7),
             ).pack(side="right")
-            desc_label = tk.Label(
+
+            tk.Label(
                 card,
                 text=desc,
-                bg=THEME["bg_input"],
-                fg=THEME["text_muted"],
+                bg=c["input"],
+                fg=c["text_3"],
                 font=("Segoe UI", 7),
                 anchor="w",
-                justify="left",
-            )
-            desc_label.pack(fill="x", padx=9, pady=(0, 8))
-            self._mode_card_labels[value] = (title_label, desc_label)
+            ).pack(fill="x", padx=8, pady=(0, 8))
 
             if available:
-                handler = lambda _e, v=value: self._select_mode(v)
-                for widget in (card, row, title_label, desc_label):
+                handler = lambda _event, v=value: self._select_mode(v)
+                for widget in (card, title_row, title_label):
                     widget.bind("<Button-1>", handler)
 
-        tk.Frame(side_body, height=1, bg=THEME["border"]).pack(fill="x", pady=14)
+        tk.Frame(body, height=1, bg=c["border_soft"]).pack(fill="x", pady=13)
 
         tk.Label(
-            side_body,
-            text="PDF SETTINGS",
-            bg=THEME["bg_card"],
-            fg=THEME["text_muted"],
+            body,
+            text="OUTPUT",
+            bg=c["surface"],
+            fg=c["text_3"],
             font=("Segoe UI", 8, "bold"),
         ).pack(anchor="w")
 
-        settings = tk.Frame(side_body, bg=THEME["bg_card"])
-        settings.pack(fill="x", pady=(7, 0))
+        output_row = tk.Frame(body, bg=c["surface"])
+        output_row.pack(fill="x", pady=(6, 5))
 
+        self.output_var = getattr(self, "output_var", tk.StringVar(value=""))
+        self.output_entry = tk.Entry(
+            output_row,
+            textvariable=self.output_var,
+            bg=c["surface_3"],
+            fg=c["text"],
+            insertbackground=c["accent"],
+            font=("Segoe UI", 9),
+            relief="flat",
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=c["border"],
+            highlightcolor=c["accent"],
+        )
+        self.output_entry.pack(side="left", fill="x", expand=True, ipady=7, padx=(0, 6))
+        self._button(output_row, "Browse", self.choose_output).pack(side="right")
+
+        settings = tk.Frame(body, bg=c["surface"])
+        settings.pack(fill="x", pady=(4, 0))
         tk.Label(
             settings,
             text="Margins",
-            bg=THEME["bg_card"],
-            fg=THEME["text_secondary"],
+            bg=c["surface"],
+            fg=c["text_2"],
             font=("Segoe UI", 9),
-        ).grid(row=0, column=0, sticky="w", pady=(0, 7))
+        ).grid(row=0, column=0, sticky="w", pady=4)
 
-        self.margin_var = tk.StringVar(value="14mm")
+        self.margin_var = getattr(self, "margin_var", tk.StringVar(value="14mm"))
         ttk.Combobox(
             settings,
             textvariable=self.margin_var,
             values=["10mm", "14mm", "20mm", "0.5in", "0.75in"],
             state="readonly",
-            width=9,
-            style="Dark.TCombobox",
-        ).grid(row=0, column=1, sticky="e", pady=(0, 7))
+            width=8,
+            style="MD.TCombobox",
+        ).grid(row=0, column=1, sticky="e")
 
-        tk.Label(
-            settings,
-            text="After export",
-            bg=THEME["bg_card"],
-            fg=THEME["text_secondary"],
-            font=("Segoe UI", 9),
-        ).grid(row=1, column=0, sticky="w")
-
-        self.open_pdf_var = tk.BooleanVar(value=True)
+        self.open_pdf_var = getattr(self, "open_pdf_var", tk.BooleanVar(value=True))
         tk.Checkbutton(
             settings,
             text="Open PDF automatically",
             variable=self.open_pdf_var,
-            bg=THEME["bg_card"],
-            fg=THEME["text_secondary"],
-            activebackground=THEME["bg_card"],
-            activeforeground=THEME["text_primary"],
-            selectcolor=THEME["bg_card_hover"],
+            bg=c["surface"],
+            fg=c["text_2"],
+            activebackground=c["surface"],
+            activeforeground=c["text"],
+            selectcolor=c["surface_3"],
             font=("Segoe UI", 8),
             relief="flat",
             bd=0,
             highlightthickness=0,
-        ).grid(row=1, column=1, sticky="e")
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(7, 0))
 
-        tk.Frame(side_body, height=1, bg=THEME["border"]).pack(fill="x", pady=14)
+        tk.Frame(body, height=1, bg=c["border_soft"]).pack(fill="x", pady=13)
 
-        env_head = tk.Frame(side_body, bg=THEME["bg_card"])
+        env_head = tk.Frame(body, bg=c["surface"])
         env_head.pack(fill="x")
         tk.Label(
             env_head,
             text="ENVIRONMENT",
-            bg=THEME["bg_card"],
-            fg=THEME["text_muted"],
+            bg=c["surface"],
+            fg=c["text_3"],
             font=("Segoe UI", 8, "bold"),
         ).pack(side="left")
 
-        self.environment_expanded = False
+        self.environment_expanded = getattr(self, "environment_expanded", False)
         self.environment_button = tk.Button(
             env_head,
-            text="Show",
+            text="Hide" if self.environment_expanded else "Show",
             command=self._toggle_environment,
-            bg=THEME["bg_card"],
-            fg=THEME["accent_cyan"],
-            activebackground=THEME["bg_card"],
-            activeforeground=THEME["text_primary"],
+            bg=c["surface"],
+            fg=c["accent_hover"],
+            activebackground=c["surface"],
+            activeforeground=c["text"],
             font=("Segoe UI", 8, "bold"),
             relief="flat",
             bd=0,
@@ -748,100 +1092,113 @@ class MD2PDFStudioApp:
         )
         self.environment_button.pack(side="right")
 
-        self.environment_frame = tk.Frame(side_body, bg=THEME["bg_card"])
+        self.environment_frame = tk.Frame(body, bg=c["surface"])
+        if self.environment_expanded:
+            self.environment_frame.pack(fill="x", pady=(7, 0))
+        self._populate_environment()
 
-        env_summary = f"{sum(1 for ok in self.have.values() if ok)}/{len(self.have)} native tools detected"
-        tk.Label(
-            side_body,
-            text=env_summary,
-            bg=THEME["bg_card"],
-            fg=THEME["text_muted"],
-            font=("Segoe UI", 8),
-        ).pack(anchor="w", pady=(7, 0))
+        return panel
 
-        # --------------------------------------------------------------
-        # Bottom status / primary action
-        # --------------------------------------------------------------
-        bottom = tk.Frame(
-            shell,
-            bg=THEME["bg_card"],
-            highlightbackground=THEME["border"],
+    def _build_statusbar(self):
+        c = self._colors()
+        bar = tk.Frame(
+            self.ui_container,
+            bg=c["surface"],
+            highlightbackground=c["border"],
             highlightthickness=1,
         )
-        bottom.pack(fill="x")
+        bar.pack(fill="x")
 
-        status_left = tk.Frame(bottom, bg=THEME["bg_card"])
-        status_left.pack(side="left", fill="x", expand=True, padx=12, pady=9)
+        left = tk.Frame(bar, bg=c["surface"])
+        left.pack(side="left", padx=11, pady=8)
+
+        self.status_dot = tk.Label(
+            left,
+            text="●",
+            bg=c["surface"],
+            fg=c["success"],
+            font=("Segoe UI", 8),
+        )
+        self.status_dot.pack(side="left", padx=(0, 5))
 
         self.status = tk.Label(
-            status_left,
+            left,
             text="Ready",
-            bg=THEME["bg_card"],
-            fg=THEME["accent_emerald"],
-            font=("Segoe UI", 9, "bold"),
-            anchor="w",
+            bg=c["surface"],
+            fg=c["text_2"],
+            font=("Segoe UI", 8, "bold"),
         )
         self.status.pack(side="left")
 
-        self.open_folder_btn = ttk.Button(
-            bottom,
-            text="Reveal output",
-            command=self.open_output_folder,
-            style="Secondary.TButton",
-            state="disabled",
-        )
-        self.open_folder_btn.pack(side="right", padx=(0, 8), pady=8)
+        hint = "Ctrl+Shift+E Export  ·  Ctrl+0 Reset Zoom"
+        tk.Label(
+            bar,
+            text=hint,
+            bg=c["surface"],
+            fg=c["text_3"],
+            font=("Segoe UI", 8),
+        ).pack(side="right", padx=11)
 
-        self.convert_btn = ttk.Button(
-            bottom,
-            text="Export PDF",
-            command=self.convert,
-            style="Primary.TButton",
-        )
-        self.convert_btn.pack(side="right", padx=(0, 8), pady=8)
+    # ------------------------------------------------------------------
+    # Document / editor
+    # ------------------------------------------------------------------
 
-        self.progress = ttk.Progressbar(
-            bottom,
-            mode="indeterminate",
-            length=85,
-        )
-        self.progress.pack(side="right", padx=(0, 5), pady=8)
+    def _snapshot_document(self):
+        if not hasattr(self, "text"):
+            return {"content": "", "cursor": "1.0"}
+        try:
+            content = self.text.get("1.0", "end-1c")
+            cursor = self.text.index(tk.INSERT)
+        except tk.TclError:
+            content, cursor = "", "1.0"
+        return {"content": content, "cursor": cursor}
 
-        self._update_mode_cards()
+    def _restore_document(self, snapshot):
+        if not hasattr(self, "text"):
+            return
+        self.text.delete("1.0", "end")
+        if snapshot.get("content"):
+            self.text.insert("1.0", snapshot["content"])
+        try:
+            self.text.mark_set(tk.INSERT, snapshot.get("cursor", "1.0"))
+            self.text.see(tk.INSERT)
+        except tk.TclError:
+            pass
+        self.text.edit_modified(False)
         self._update_placeholder()
-        self._update_cursor_status()
-
-    def _make_status(self, parent, text, ok=True):
-        return tk.Label(
-            parent,
-            text=("● " if ok else "○ ") + text,
-            bg=THEME["bg_card"],
-            fg=THEME["accent_emerald"] if ok else THEME["text_muted"],
-            font=("Segoe UI", 8, "bold"),
-        )
-
-    def _editor_event(self, _event=None):
-        self._update_stats()
-        self._update_cursor_status()
         self._update_current_line()
+
+    def _set_document(self, content, path=None, dirty=False):
+        if hasattr(self, "text"):
+            self.text.delete("1.0", "end")
+            if content:
+                self.text.insert("1.0", content)
+            self.text.edit_modified(False)
+        self.md_path = path
+        self.dirty = dirty
+
+        if path:
+            self.output_var.set(os.path.splitext(path)[0] + ".pdf")
+        else:
+            self.output_var.set(os.path.join(os.getcwd(), "output.pdf"))
+
+        self._update_document_state()
+        self._update_editor_metrics()
+        self._update_cursor_status()
         self._update_placeholder()
+        self._update_current_line()
+        self._run_auto_detect()
 
     def _update_placeholder(self):
         if not hasattr(self, "editor_placeholder"):
             return
-        content = self.text.get("1.0", "end-1c")
-        if content.strip():
-            self.editor_placeholder.place_forget()
-        else:
-            self.editor_placeholder.place(x=0, y=0, relwidth=1, relheight=1)
-
-    def _update_cursor_status(self):
-        if not hasattr(self, "cursor_label"):
-            return
         try:
-            line, col = self.text.index(tk.INSERT).split(".")
-            self.cursor_label.config(text=f"Ln {int(line):,}, Col {int(col) + 1:,}")
-        except (tk.TclError, ValueError):
+            empty = not self.text.get("1.0", "end-1c").strip()
+            if empty:
+                self.editor_placeholder.place(x=0, y=0, relwidth=1, relheight=1)
+            else:
+                self.editor_placeholder.place_forget()
+        except tk.TclError:
             pass
 
     def _update_current_line(self):
@@ -854,6 +1211,88 @@ class MD2PDFStudioApp:
         except tk.TclError:
             pass
 
+    def _update_document_state(self):
+        if not hasattr(self, "file_label"):
+            return
+        name = os.path.basename(self.md_path) if self.md_path else "Scratchpad · No file loaded"
+        if self.md_path:
+            self.file_label.config(text=name + ("  •" if self.dirty else ""))
+        else:
+            self.file_label.config(text=name)
+
+        if hasattr(self, "document_state"):
+            self.document_state.config(
+                text="Unsaved changes" if self.dirty else "Saved",
+                fg=self._colors()["warning"] if self.dirty else self._colors()["success"],
+            )
+
+    def _update_editor_metrics(self):
+        if not hasattr(self, "text"):
+            return
+        try:
+            raw = self.text.get("1.0", "end-1c")
+            lines = len(raw.splitlines()) if raw else 0
+            words = len(raw.split())
+            chars = len(raw)
+            self.stats_bar.config(
+                text=f"Lines {lines:,}  ·  Words {words:,}  ·  Characters {chars:,}"
+            )
+        except tk.TclError:
+            pass
+
+    def _update_cursor_status(self):
+        if not hasattr(self, "text") or not hasattr(self, "cursor_label"):
+            return
+        try:
+            line, col = self.text.index(tk.INSERT).split(".")
+            self.cursor_label.config(text=f"Ln {int(line):,}, Col {int(col) + 1:,}")
+        except (tk.TclError, ValueError):
+            pass
+
+    def _on_editor_event(self, _event=None):
+        self._update_editor_metrics()
+        self._update_cursor_status()
+        self._update_current_line()
+        self._update_placeholder()
+
+    def _on_control_wheel(self, event):
+        if event.delta > 0:
+            self.zoom_in()
+        else:
+            self.zoom_out()
+        return "break"
+
+    def _on_text_modified(self, _event=None):
+        try:
+            self.text.edit_modified(False)
+        except tk.TclError:
+            return
+
+        self.dirty = True
+        self._update_document_state()
+        self._update_editor_metrics()
+        self._update_placeholder()
+
+        if self._detect_after_id is not None:
+            try:
+                self.root.after_cancel(self._detect_after_id)
+            except tk.TclError:
+                pass
+        self._detect_after_id = self.root.after(300, self._run_auto_detect)
+
+    # ------------------------------------------------------------------
+    # Mode detection / renderer selection
+    # ------------------------------------------------------------------
+
+    def _friendly_mode_name(self, mode):
+        return {
+            "auto": "Smart Detect",
+            "sidebar_light": "Sidebar Light",
+            "sidebar_dark": "Sidebar Dark",
+            "latex": "LaTeX Formal",
+            "simple": "Simple",
+        }.get(mode, mode)
+
     def _select_mode(self, mode):
         available = {
             "sidebar_light": self.sidebar_ok,
@@ -861,173 +1300,146 @@ class MD2PDFStudioApp:
             "latex": self.latex_ok,
             "simple": self.simple_ok,
         }.get(mode, False)
+
         if not available:
-            self._set_status("That renderer is unavailable on this machine.", THEME["accent_amber"])
-            return
-        self.mode_var.set(mode)
-        self._update_mode_cards()
-        self._run_auto_detect()
-
-    def _render_mode_cards(self):
-        self._update_mode_cards()
-
-    def _update_mode_cards(self):
-        selected = self.mode_var.get() if hasattr(self, "mode_var") else ""
-        for value, card in getattr(self, "_mode_cards", {}).items():
-            active = value == selected
-            card.configure(
-                bg=THEME["bg_card_hover"] if active else THEME["bg_input"],
-                highlightbackground=THEME["accent_cyan"] if active else THEME["border"],
+            self._set_status(
+                f"{self._friendly_mode_name(mode)} is unavailable on this machine.",
+                self._colors()["warning"],
             )
-            for child in card.winfo_children():
-                child.configure(bg=THEME["bg_card_hover"] if active else THEME["bg_input"])
-                for nested in child.winfo_children():
-                    nested.configure(bg=THEME["bg_card_hover"] if active else THEME["bg_input"])
+            return
 
-    def _toggle_environment(self):
-        self.environment_expanded = not self.environment_expanded
-        if self.environment_expanded:
-            self.environment_button.config(text="Hide")
-            self.environment_frame.pack(fill="x", pady=(8, 0))
-            for child in self.environment_frame.winfo_children():
-                child.destroy()
-            labels = {
-                "pandoc": "Pandoc",
-                "chromium": "Chromium",
-                "pdflatex": "LaTeX",
-                "wkhtmltopdf": "wkhtmltopdf",
-            }
-            for key, label in labels.items():
-                ok = self.have.get(key, False)
-                tk.Label(
-                    self.environment_frame,
-                    text=("● " if ok else "○ ") + label,
-                    bg=THEME["bg_card"],
-                    fg=THEME["accent_emerald"] if ok else THEME["text_muted"],
-                    font=("Segoe UI", 8),
-                    anchor="w",
-                ).pack(anchor="w", pady=1)
-        else:
-            self.environment_button.config(text="Show")
-            self.environment_frame.pack_forget()
-
-    def new_document(self):
-        if self.text.get("1.0", "end-1c").strip():
-            if not messagebox.askyesno(
-                "New document",
-                "Replace the current Markdown content with a new document?",
-            ):
-                return
-
-        self.text.delete("1.0", "end")
-        self.text.edit_modified(False)
-        self.md_path = None
-        self.file_label.config(text="Scratchpad · No file loaded")
-        self.stats_bar.config(text="Lines: 0  ·  Words: 0  ·  Characters: 0")
-        self._set_status("New document", THEME["text_secondary"])
-        self._update_placeholder()
-        self._update_current_line()
+        self.mode_var.set(mode)
         self._run_auto_detect()
-
-    def _set_status(self, text, color):
-        if hasattr(self, "status"):
-            self.status.config(text=text, fg=color)
-
-    def _create_telemetry_pill(self, parent, name, is_ok, tooltip_text, optional=False):
-        color = THEME["accent_emerald"] if is_ok else (THEME["text_muted"] if optional else THEME["accent_rose"])
-        symbol = "●" if is_ok else "○"
-        pill = tk.Label(
-            parent,
-            text=f"{symbol} {name}",
-            bg=THEME["bg_card"],
-            fg=color,
-            font=("Segoe UI", 8, "bold"),
-            padx=6,
-            pady=2,
-            bd=1,
-            relief="solid",
-        )
-        pill.pack(side="left", padx=3)
-
-    def _on_text_modified(self, _event=None):
-        self.text.edit_modified(False)
-        self._update_stats()
-        if self._detect_after_id is not None:
-            self.root.after_cancel(self._detect_after_id)
-        self._detect_after_id = self.root.after(350, self._run_auto_detect)
-
-    def _update_stats(self, _event=None):
-        raw_content = self.text.get("1.0", "end-1c")
-        lines = len(raw_content.splitlines()) if raw_content else 0
-        words = len(raw_content.split())
-        chars = len(raw_content)
-        self.stats_bar.config(text=f"Lines: {lines:,}  •  Words: {words:,}  •  Chars: {chars:,}")
 
     def _run_auto_detect(self):
-        self._detect_after_id = None
         if not hasattr(self, "detect_label"):
+            return
+
+        if self._detect_after_id is not None:
+            self._detect_after_id = None
+
+        content = self.text.get("1.0", "end") if hasattr(self, "text") else ""
+        if not content.strip():
+            self.detect_label.config(
+                text="Ready to inspect the document.",
+                fg=self._colors()["accent_hover"],
+            )
+            self._update_mode_cards()
             return
 
         if not self.auto_detect_var.get():
             self.detect_label.config(
                 text="Smart detection is off.",
-                fg=THEME["text_muted"],
+                fg=self._colors()["text_3"],
             )
+            self._update_mode_cards()
             return
 
-        content = self.text.get("1.0", "end")
-        if not content.strip():
+        mode = self.mode_var.get()
+        if mode != "auto":
             self.detect_label.config(
-                text="Ready to inspect the document.",
-                fg=THEME["accent_cyan"],
+                text=f"Manual renderer: {self._friendly_mode_name(mode)}",
+                fg=self._colors()["text_2"],
             )
-            return
-
-        # A manual selection is authoritative; detection only explains it.
-        current_mode = self.mode_var.get()
-        if current_mode in ("sidebar_light", "sidebar_dark", "latex", "simple"):
-            self.detect_label.config(
-                text=f"Manual renderer: {self._friendly_mode_name(current_mode)}",
-                fg=THEME["text_secondary"],
-            )
+            self._update_mode_cards()
             return
 
         needed_sidebar, reason_sidebar = detect_sidebar_needed(content)
+        needed_latex, reason_latex = detect_latex_needed(content)
+
         if needed_sidebar and self.sidebar_ok:
             self.detect_label.config(
                 text=f"Detected: {reason_sidebar}",
-                fg=THEME["accent_cyan"],
+                fg=self._colors()["accent_hover"],
             )
-            return
-
-        needed_latex, reason_latex = detect_latex_needed(content)
-        if needed_latex and self.latex_ok:
+        elif needed_latex and self.latex_ok:
             self.detect_label.config(
                 text=f"Detected: {reason_latex}",
-                fg=THEME["accent_emerald"],
+                fg=self._colors()["success"],
             )
-            return
-
-        if needed_latex and not self.latex_ok:
+        elif needed_latex and not self.latex_ok:
             self.detect_label.config(
-                text="Math detected; LaTeX unavailable. Smart mode will use a fallback.",
-                fg=THEME["accent_amber"],
+                text="Math detected; LaTeX unavailable. Smart mode will use a compatible fallback.",
+                fg=self._colors()["warning"],
             )
+        else:
+            self.detect_label.config(
+                text="No special features detected; a standard renderer is sufficient.",
+                fg=self._colors()["text_2"],
+            )
+
+        self._update_mode_cards()
+
+    def _update_mode_cards(self):
+        if not hasattr(self, "_mode_cards"):
+            return
+        c = self._colors()
+        selected = self.mode_var.get()
+        for mode, card in self._mode_cards.items():
+            active = mode == selected
+            bg = c["selected"] if active else c["input"]
+            card.config(
+                bg=bg,
+                highlightbackground=c["accent"] if active else c["border"],
+            )
+            for child in card.winfo_children():
+                child.config(bg=bg)
+                for nested in child.winfo_children():
+                    nested.config(bg=bg)
+
+    # ------------------------------------------------------------------
+    # Environment
+    # ------------------------------------------------------------------
+
+    def _populate_environment(self):
+        c = self._colors()
+        if not hasattr(self, "environment_frame"):
             return
 
-        self.detect_label.config(
-            text="No special features detected; standard renderer is sufficient.",
-            fg=THEME["text_secondary"],
+        for child in self.environment_frame.winfo_children():
+            child.destroy()
+
+        items = (
+            ("Pandoc", self.have.get("pandoc", False)),
+            ("Chromium", self.have.get("chromium", False)),
+            ("LaTeX", self.latex_ok),
+            ("wkhtmltopdf", self.have.get("wkhtmltopdf", False)),
         )
 
-    def _friendly_mode_name(self, mode):
-        return {
-            "sidebar_light": "Sidebar Light",
-            "sidebar_dark": "Sidebar Dark",
-            "latex": "LaTeX Formal",
-            "simple": "Simple",
-            "auto": "Smart Detect",
-        }.get(mode, mode)
+        for label, ok in items:
+            tk.Label(
+                self.environment_frame,
+                text=("● " if ok else "○ ") + label,
+                bg=c["surface"],
+                fg=c["success"] if ok else c["text_3"],
+                font=("Segoe UI", 8),
+                anchor="w",
+            ).pack(anchor="w", pady=1)
+
+    def _toggle_environment(self):
+        self.environment_expanded = not self.environment_expanded
+        if self.environment_expanded:
+            self.environment_button.config(text="Hide")
+            self.environment_frame.pack(fill="x", pady=(7, 0))
+        else:
+            self.environment_button.config(text="Show")
+            self.environment_frame.pack_forget()
+
+    # ------------------------------------------------------------------
+    # File operations
+    # ------------------------------------------------------------------
+
+    def new_document(self):
+        if self.text.get("1.0", "end-1c").strip():
+            choice = messagebox.askyesno(
+                "New document",
+                "Replace the current Markdown document?",
+            )
+            if not choice:
+                return
+
+        self._set_document("", None, False)
+        self._set_status("New document", self._colors()["text_2"])
 
     def open_file(self):
         path = filedialog.askopenfilename(
@@ -1048,156 +1460,215 @@ class MD2PDFStudioApp:
             messagebox.showerror("Open failed", str(exc))
             return
 
-        self.text.delete("1.0", "end")
-        self.text.insert("1.0", content)
-        self.text.edit_modified(False)
-        self.md_path = path
-        self.file_label.config(text=os.path.basename(path))
-        self._update_stats()
-        self._update_placeholder()
-        self._update_current_line()
-        self._set_status(f"Opened {os.path.basename(path)}", THEME["accent_emerald"])
-        self._run_auto_detect()
+        self._set_document(content, path, False)
+        self._set_status(f"Opened {os.path.basename(path)}", self._colors()["success"])
 
     def paste_clipboard(self):
         try:
-            clip = self.root.clipboard_get()
-            if clip:
-                self.text.insert(tk.INSERT, clip)
-                self._update_stats()
-                self._run_auto_detect()
-        except Exception:
-            pass
+            content = self.root.clipboard_get()
+        except tk.TclError:
+            self._set_status("Clipboard has no readable text.", self._colors()["warning"])
+            return
 
-    def clear_editor(self):
-        if messagebox.askyesno("Clear Editor", "Clear all content from the editor?"):
-            self.text.delete("1.0", "end")
-            self.md_path = None
-            self.file_label.config(text="Scratchpad · No file loaded")
-            self._update_stats()
+        if content:
+            self.text.insert(tk.INSERT, content)
+            self.text.see(tk.INSERT)
+            self.dirty = True
+            self._update_document_state()
+            self._on_editor_event()
             self._run_auto_detect()
 
-    def open_output_folder(self):
-        if self.last_output_pdf and os.path.exists(self.last_output_pdf):
-            folder = os.path.dirname(os.path.abspath(self.last_output_pdf))
-            self._open_path(folder)
+    def save_file(self):
+        path = self.md_path
+        if not path:
+            path = filedialog.asksaveasfilename(
+                title="Save Markdown",
+                defaultextension=".md",
+                initialfile="untitled.md",
+                filetypes=[
+                    ("Markdown files", "*.md"),
+                    ("All files", "*.*"),
+                ],
+            )
+            if not path:
+                return False
+
+        try:
+            with open(path, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(self.text.get("1.0", "end-1c"))
+        except OSError as exc:
+            messagebox.showerror("Save failed", str(exc))
+            return False
+
+        self.md_path = path
+        self.dirty = False
+        self.output_var.set(os.path.splitext(path)[0] + ".pdf")
+        self._update_document_state()
+        self._set_status(f"Saved {os.path.basename(path)}", self._colors()["success"])
+        return True
+
+    def clear_editor(self):
+        if not self.text.get("1.0", "end-1c").strip():
+            return
+        if messagebox.askyesno("Clear editor", "Clear the Markdown document?"):
+            self._set_document("", None, False)
+            self._set_status("Editor cleared", self._colors()["text_2"])
+
+    def choose_output(self):
+        current = self.output_var.get().strip()
+        initial_dir = os.path.dirname(current) if current else None
+        initial_file = os.path.basename(current) if current else "output.pdf"
+
+        path = filedialog.asksaveasfilename(
+            title="Choose PDF output",
+            defaultextension=".pdf",
+            initialdir=initial_dir,
+            initialfile=initial_file,
+            filetypes=[("PDF documents", "*.pdf")],
+        )
+        if path:
+            self.output_var.set(path)
+
+    # ------------------------------------------------------------------
+    # Export
+    # ------------------------------------------------------------------
+
+    def _resolve_mode(self, content):
+        selected = self.mode_var.get()
+        if selected != "auto":
+            return selected
+
+        needed_sidebar, _ = detect_sidebar_needed(content)
+        needed_latex, _ = detect_latex_needed(content)
+
+        if needed_sidebar and self.sidebar_ok:
+            return "sidebar_light"
+        if needed_latex and self.latex_ok:
+            return "latex"
+        if self.sidebar_ok:
+            return "sidebar_light"
+        if self.latex_ok:
+            return "latex"
+        if self.simple_ok:
+            return "simple"
+        return None
 
     def convert(self):
         if self._conversion_in_progress:
             return
 
-        mode = self.mode_var.get()
+        content = self.text.get("1.0", "end-1c").strip()
+        if not content:
+            messagebox.showwarning(
+                "Nothing to export",
+                "Add Markdown content before exporting.",
+            )
+            self.text.focus_set()
+            return
 
-        if mode in ("sidebar_dark", "sidebar_light") and not self.sidebar_ok:
+        mode = self._resolve_mode(content)
+        if not mode:
             messagebox.showerror(
-                "Missing Dependencies",
-                "Sidebar mode requires Pandoc and Google Chrome or Microsoft Edge.",
+                "No renderer available",
+                "No compatible PDF renderer is currently available. Check Environment.",
             )
             return
-        if mode == "simple" and not self.simple_ok:
-            messagebox.showerror("Missing Dependencies", "Simple mode requires Pandoc and wkhtmltopdf.")
+
+        available = {
+            "sidebar_light": self.sidebar_ok,
+            "sidebar_dark": self.sidebar_ok,
+            "latex": self.latex_ok,
+            "simple": self.simple_ok,
+        }
+        if not available.get(mode, False):
+            messagebox.showerror(
+                "Renderer unavailable",
+                f"{self._friendly_mode_name(mode)} is not currently available.",
+            )
             return
-        if mode == "latex" and not self.latex_ok:
-            messagebox.showerror("Missing Dependencies", "LaTeX mode requires Pandoc and pdflatex.")
-            return
 
-        md_content = self.text.get("1.0", "end").strip()
-        if not md_content:
-            messagebox.showwarning("Empty Content", "No Markdown content found in the editor to convert.")
-            return
-
-        margin = self.margin_var.get().strip() or "14mm"
-
-        default_name = "output.pdf"
-        initial_dir = None
-        if self.md_path:
-            default_name = os.path.splitext(os.path.basename(self.md_path))[0] + ".pdf"
-            initial_dir = os.path.dirname(self.md_path)
-
-        save_path = filedialog.asksaveasfilename(
-            title="Export PDF to",
-            defaultextension=".pdf",
-            initialdir=initial_dir,
-            initialfile=default_name,
-            filetypes=[("PDF Documents", "*.pdf")],
-        )
+        save_path = self.output_var.get().strip()
+        if not save_path:
+            self.choose_output()
+            save_path = self.output_var.get().strip()
         if not save_path:
             return
 
-        # Snapshot all Tk state before handing work to the background thread.
+        if not save_path.lower().endswith(".pdf"):
+            save_path += ".pdf"
+            self.output_var.set(save_path)
+
+        save_path = os.path.abspath(os.path.expanduser(save_path))
+        try:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        except OSError as exc:
+            messagebox.showerror("Output error", str(exc))
+            return
+
+        margin = self.margin_var.get().strip() or "14mm"
         theme = "dark" if mode == "sidebar_dark" else "light"
         open_pdf_after = bool(self.open_pdf_var.get())
-        renderer = "Smart Detect" if mode == "auto" else {
-            "sidebar_dark": "Sidebar Dark",
-            "sidebar_light": "Sidebar Light",
-            "latex": "LaTeX",
-            "simple": "Simple",
-        }.get(mode, mode)
 
         self._conversion_in_progress = True
         self.convert_btn.config(state="disabled")
-        self.status.config(
-            text=f"⏳ Converting with {renderer}...",
-            fg=THEME["accent_amber"],
+        self.progress.start(8)
+
+        self._set_status(
+            f"Exporting with {self._friendly_mode_name(mode)}…",
+            self._colors()["warning"],
         )
 
         worker = threading.Thread(
             target=self._convert_worker,
-            args=(md_content, save_path, margin, mode, theme, open_pdf_after),
+            args=(content, save_path, margin, mode, theme, open_pdf_after),
             daemon=True,
             name="md2pdf-conversion",
         )
         worker.start()
         self._conversion_after_id = self.root.after(100, self._poll_conversion)
 
-    def _convert_worker(self, md_content, save_path, margin, mode, theme, open_pdf_after):
+    def _convert_worker(self, content, save_path, margin, mode, theme, open_pdf_after):
         start_time = time.time()
         try:
             if mode == "auto":
                 backend = convert_auto(
-                    md_content,
+                    content,
                     save_path,
                     margin=margin,
                     theme=theme,
                 )
-            elif mode in ("sidebar_dark", "sidebar_light"):
-                convert_sidebar(md_content, save_path, margin=margin, theme=theme)
+            elif mode in ("sidebar_light", "sidebar_dark"):
+                convert_sidebar(content, save_path, margin=margin, theme=theme)
                 backend = "sidebar"
             elif mode == "latex":
-                convert_latex(md_content, save_path, margin=margin)
+                convert_latex(content, save_path, margin=margin)
                 backend = "latex"
             elif mode == "simple":
-                convert_simple(md_content, save_path, margin=margin)
+                convert_simple(content, save_path, margin=margin)
                 backend = "simple"
             else:
                 raise ValueError(f"Unsupported renderer: {mode}")
 
-            file_size_kb = os.path.getsize(save_path) / 1024
-            elapsed = time.time() - start_time
+            size_kb = os.path.getsize(save_path) / 1024
             self._conversion_queue.put(
                 {
                     "ok": True,
                     "save_path": save_path,
-                    "elapsed": elapsed,
-                    "file_size_kb": file_size_kb,
+                    "elapsed": time.time() - start_time,
+                    "file_size_kb": size_kb,
                     "open_pdf": open_pdf_after,
-                    "mode": mode,
                     "backend": backend,
                 }
             )
         except Exception as exc:
-            self._conversion_queue.put(
-                {
-                    "ok": False,
-                    "error": str(exc),
-                }
-            )
+            self._conversion_queue.put({"ok": False, "error": str(exc)})
 
     def _poll_conversion(self):
         try:
             result = self._conversion_queue.get_nowait()
         except queue.Empty:
-            self._conversion_after_id = self.root.after(100, self._poll_conversion)
+            if self._conversion_in_progress:
+                self._conversion_after_id = self.root.after(100, self._poll_conversion)
             return
 
         self._conversion_after_id = None
@@ -1206,51 +1677,128 @@ class MD2PDFStudioApp:
     def _finish_conversion(self, result):
         self._conversion_in_progress = False
         self.convert_btn.config(state="normal")
+        self.progress.stop()
 
         if not result["ok"]:
-            error = result["error"]
-            self.status.config(
-                text=f"Export failed: {error[:100]}",
-                fg=THEME["accent_rose"],
-            )
-            messagebox.showerror("Export Failed", error)
+            self._set_status("Export failed.", self._colors()["danger"])
+            messagebox.showerror("Export failed", result["error"])
             return
 
         save_path = result["save_path"]
-        elapsed = result["elapsed"]
-        file_size_kb = result["file_size_kb"]
-        size_str = f"{file_size_kb:.1f} KB" if file_size_kb < 1024 else f"{file_size_kb/1024:.2f} MB"
-
         self.last_output_pdf = save_path
         self.open_folder_btn.config(state="normal")
 
-        backend_names = {
+        size_kb = result["file_size_kb"]
+        size_text = f"{size_kb:.1f} KB" if size_kb < 1024 else f"{size_kb / 1024:.2f} MB"
+        backend = {
             "sidebar": "Sidebar",
             "latex": "LaTeX",
             "simple": "Simple",
-        }
-        backend = backend_names.get(result.get("backend"), result.get("backend", "PDF"))
+        }.get(result.get("backend"), result.get("backend", "PDF"))
 
-        self.status.config(
-            text=f"PDF ready · {os.path.basename(save_path)} · {backend} · {size_str} · {elapsed:.1f}s",
-            fg=THEME["accent_emerald"],
+        self._set_status(
+            f"PDF ready · {os.path.basename(save_path)} · {backend} · {size_text} · {result['elapsed']:.1f}s",
+            self._colors()["success"],
         )
 
         if result["open_pdf"]:
             self._open_path(save_path)
 
+    # ------------------------------------------------------------------
+    # Status / shortcuts
+    # ------------------------------------------------------------------
+
+    def _set_status(self, text, color):
+        if hasattr(self, "status"):
+            self.status.config(text=text)
+            self.status_dot.config(fg=color)
+
+    def _update_scale_indicators(self):
+        c = self._colors()
+        if hasattr(self, "zoom_label"):
+            self.zoom_label.config(
+                text=f"{self.zoom_percent}%",
+                bg=c["surface_3"],
+                fg=c["text"],
+            )
+        if hasattr(self, "dpi_label"):
+            dpi_percent = round((self._current_dpi / 96.0) * 100)
+            self.dpi_label.config(
+                text=f"DPI {dpi_percent}%",
+                fg=c["text_3"],
+                bg=c["root"],
+            )
+
     def _open_path(self, path):
-        if sys.platform == "win32":
-            os.startfile(path)
-        elif sys.platform == "darwin":
-            subprocess.run(["open", path], check=False)
+        try:
+            if sys.platform == "win32":
+                os.startfile(path)
+            elif sys.platform == "darwin":
+                subprocess.run(["open", path], check=False)
+            else:
+                subprocess.run(["xdg-open", path], check=False)
+        except OSError as exc:
+            messagebox.showerror("Open failed", str(exc))
+
+    def open_output_folder(self):
+        if self.last_output_pdf and os.path.exists(self.last_output_pdf):
+            self._open_path(os.path.dirname(os.path.abspath(self.last_output_pdf)))
         else:
-            subprocess.run(["xdg-open", path], check=False)
+            output = self.output_var.get().strip()
+            if output:
+                self._open_path(os.path.dirname(os.path.abspath(output)))
+
+    def _bind_shortcuts(self):
+        self.root.bind("<Control-o>", lambda _e: self.open_file())
+        self.root.bind("<Control-s>", lambda _e: self.save_file())
+        self.root.bind("<Control-n>", lambda _e: self.new_document())
+        self.root.bind("<Control-Shift-E>", lambda _e: self.convert())
+        self.root.bind("<Control-Shift-e>", lambda _e: self.convert())
+        self.root.bind("<Control-KeyPress-equal>", lambda _e: self.zoom_in())
+        self.root.bind("<Control-KeyPress-plus>", lambda _e: self.zoom_in())
+        self.root.bind("<Control-KeyPress-minus>", lambda _e: self.zoom_out())
+        self.root.bind("<Control-KeyPress-0>", lambda _e: self.reset_zoom())
+
+    def _cancel_scheduled_callbacks(self):
+        for attr in ("_detect_after_id", "_conversion_after_id"):
+            value = getattr(self, attr, None)
+            if value is not None:
+                try:
+                    self.root.after_cancel(value)
+                except tk.TclError:
+                    pass
+                setattr(self, attr, None)
+
+    def _on_close(self):
+        if self._conversion_in_progress:
+            messagebox.showwarning(
+                "Export in progress",
+                "Please wait for the current export to finish before closing.",
+            )
+            return
+
+        self._save_preferences()
+        if self._dpi_after_id is not None:
+            try:
+                self.root.after_cancel(self._dpi_after_id)
+            except tk.TclError:
+                pass
+        if self.dirty:
+            choice = messagebox.askyesnocancel(
+                "Unsaved changes",
+                "Save Markdown changes before closing?",
+            )
+            if choice is None:
+                return
+            if choice and not self.save_file():
+                return
+        self.root.destroy()
 
 
 def main():
     _enable_windows_thread_dpi_awareness()
     root = tk.Tk()
+    _enable_windows_thread_dpi_awareness()
     app = MD2PDFStudioApp(root)
     root.mainloop()
 
