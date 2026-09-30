@@ -51,20 +51,31 @@ jobs:
         shell: pwsh
         run: |
           python -m PyInstaller --noconfirm --clean packaging/windows/md2pdf-studio.spec
-      - name: Verify Windows bundle
+      - name: Verify Windows bundle and embedded DPI manifest
         shell: pwsh
         run: |
-          if (-not (Test-Path "dist/md2pdf-studio/md2pdf-studio.exe")) {
+          $exe = Resolve-Path "dist/md2pdf-studio/md2pdf-studio.exe"
+          if (-not (Test-Path $exe)) {
             throw "Windows executable was not produced."
           }
-          $exe = Resolve-Path "dist/md2pdf-studio/md2pdf-studio.exe"
-          Write-Host "Built $exe"
-          # The PE executable must contain the embedded manifest supplied to PyInstaller.
-          $bytes = [System.IO.File]::ReadAllBytes($exe)
-          $text = [System.Text.Encoding]::ASCII.GetString($bytes)
-          if ($text -notmatch "md2pdf.Studio") {
-            Write-Warning "Application identity string was not found in a raw PE string scan; build itself succeeded."
+
+          $sdkTools = Get-ChildItem -Path "$env:ProgramFiles(x86)\Windows Kits\10\bin", "$env:ProgramFiles\Windows Kits\10\bin" -Recurse -Filter "mt.exe" -ErrorAction SilentlyContinue | Sort-Object FullName -Descending
+          if (-not $sdkTools) {
+            throw "Windows SDK mt.exe was not found; cannot validate the embedded manifest."
           }
+
+          $manifestPath = Join-Path $env:RUNNER_TEMP "md2pdf-studio.manifest.xml"
+          & $sdkTools[0].FullName -nologo -inputresource:"$exe;#1" -out:"$manifestPath"
+          if ($LASTEXITCODE -ne 0) {
+            throw "mt.exe could not extract the executable manifest."
+          }
+
+          $manifest = Get-Content $manifestPath -Raw
+          if ($manifest -notmatch "PerMonitorV2") {
+            throw "Embedded manifest does not declare PerMonitorV2."
+          }
+
+          Write-Host "Verified PerMonitorV2 manifest in $exe"
       - name: Package Windows bundle
         shell: pwsh
         run: |
