@@ -183,14 +183,12 @@ class MD2PDFStudioApp:
         return min(MD2PDFStudioApp.ZOOM_STEPS, key=lambda x: abs(x - value))
 
     @staticmethod
-    def _preferred_tk_scaling(dpi):
-        """Return Tk's pixels-per-point scale for a physical display DPI."""
+    def _safe_float(value, default=96.0 / 72.0):
         try:
-            dpi = float(dpi)
+            value = float(value)
         except (TypeError, ValueError):
-            dpi = 96.0
-        dpi = max(72.0, min(384.0, dpi))
-        return (96.0 / 72.0) * (dpi / 96.0)
+            return default
+        return value if value > 0 else default
 
     @staticmethod
     def _get_preferences_path():
@@ -239,26 +237,62 @@ class MD2PDFStudioApp:
             pass
         return 96
 
-    def _configure_display_scaling(self, initial=False):
-        dpi = self._get_window_dpi() if not initial else 96
-        if initial and sys.platform == "win32":
-            try:
-                dpi = int(ctypes.windll.user32.GetDpiForSystem())
-            except (AttributeError, OSError, TypeError, ValueError):
-                dpi = 96
-
-        self._current_dpi = dpi or 96
-        base = self._preferred_tk_scaling(self._current_dpi)
-        scale = base * (self.zoom_percent / 100.0)
-
+    def _get_tk_scaling(self):
         try:
-            self.root.tk.call("tk", "scaling", scale)
+            return self._safe_float(self.root.tk.call("tk", "scaling"))
+        except tk.TclError:
+            return 96.0 / 72.0
+
+    def _set_tk_scaling(self, value):
+        try:
+            self.root.tk.call("tk", "scaling", float(value))
         except tk.TclError:
             pass
 
+    def _configure_display_scaling(self, initial=False):
+        """Let Windows/Tk own monitor DPI; apply only the user's UI zoom."""
+        if initial:
+            try:
+                self.root.update_idletasks()
+            except tk.TclError:
+                pass
+
+            self._current_dpi = self._get_window_dpi()
+            # Tk's current scaling is the monitor-native baseline. Do not
+            # multiply it by the Windows DPI a second time.
+            self._native_tk_scaling = self._get_tk_scaling()
+        else:
+            self._current_dpi = self._get_window_dpi()
+
+            current_tk = self._get_tk_scaling()
+            previous_zoom = max(0.01, self.zoom_percent / 100.0)
+            previous_native = getattr(
+                self,
+                "_native_tk_scaling",
+                current_tk / previous_zoom,
+            )
+            previous_applied = getattr(
+                self,
+                "_applied_tk_scaling",
+                previous_native * previous_zoom,
+            )
+
+            # Per-Monitor V2/Tk may already have changed its native scaling
+            # when the window enters a different-DPI monitor. Capture that
+            # new native value before applying the user's zoom multiplier.
+            if abs(current_tk - previous_applied) > 0.01:
+                self._native_tk_scaling = current_tk / previous_zoom
+            else:
+                self._native_tk_scaling = previous_native
+
+        native = self._safe_float(self._native_tk_scaling)
+        desired = native * (self.zoom_percent / 100.0)
+        self._set_tk_scaling(desired)
+        self._applied_tk_scaling = desired
+
     def _start_dpi_monitor(self):
         self._check_for_dpi_change()
-        self._dpi_after_id = self.root.after(1200, self._start_dpi_monitor)
+        self._dpi_after_id = self.root.after(1000, self._start_dpi_monitor)
 
     def _check_for_dpi_change(self):
         try:
@@ -266,13 +300,19 @@ class MD2PDFStudioApp:
         except tk.TclError:
             return
 
-        if dpi and abs(dpi - self._current_dpi) >= 8:
+        if dpi and abs(dpi - self._current_dpi) >= 1:
             self._current_dpi = dpi
-            self._configure_display_scaling()
+            self._rebuild_scaled_ui()
+        else:
             self._update_scale_indicators()
 
     def _effective_display_scale(self):
-        return (self._current_dpi / 96.0) * (self.zoom_percent / 100.0)
+        """Return only the user-controlled zoom factor."""
+        return self.zoom_percent / 100.0
+
+    def _ui_px(self, pixels):
+        """Scale pixel-authored custom drawing by UI zoom, not monitor DPI."""
+        return max(1, int(round(float(pixels) * self._effective_display_scale())))
 
     def _snapshot_view_state(self):
         snapshot = self._snapshot_document()
@@ -498,10 +538,7 @@ class MD2PDFStudioApp:
         width = min(width, max(1180, screen_w - 48))
         height = min(height, max(760, screen_h - 72))
         self.root.geometry(f"{width}x{height}")
-        self.root.minsize(
-            int(980 * max(1.0, self._current_dpi / 96.0)),
-            int(650 * max(1.0, self._current_dpi / 96.0)),
-        )
+        self.root.minsize(980, 650)
 
     def _check_deps(self):
         self.have = check_tools()
@@ -596,8 +633,8 @@ class MD2PDFStudioApp:
         row = tk.Frame(parent, bg=c["surface"], cursor="hand2")
         track = tk.Canvas(
             row,
-            width=34,
-            height=18,
+            width=self._ui_px(34),
+            height=self._ui_px(18),
             bg=c["surface"],
             highlightthickness=0,
             bd=0,
@@ -622,14 +659,14 @@ class MD2PDFStudioApp:
             outline = c["accent"] if on else c["border"]
             track.create_rounded_rectangle if hasattr(track, "create_rounded_rectangle") else None
             track.create_rectangle(
-                2, 3, 32, 15,
+                self._ui_px(2), self._ui_px(3), self._ui_px(32), self._ui_px(15),
                 fill=fill,
                 outline=outline,
                 width=1,
             )
-            knob_x = 25 if on else 9
+            knob_x = self._ui_px(25 if on else 9)
             track.create_oval(
-                knob_x - 4, 5, knob_x + 4, 13,
+                knob_x - self._ui_px(4), self._ui_px(5), knob_x + self._ui_px(4), self._ui_px(13),
                 fill="#ffffff",
                 outline="#ffffff",
             )
@@ -661,8 +698,8 @@ class MD2PDFStudioApp:
 
         dot = tk.Canvas(
             title_row,
-            width=12,
-            height=12,
+            width=self._ui_px(12),
+            height=self._ui_px(12),
             bg=c["input"],
             highlightthickness=0,
             bd=0,
@@ -707,7 +744,7 @@ class MD2PDFStudioApp:
                 width=1,
             )
             if active:
-                dot.create_oval(4, 4, 8, 8, fill=c["accent"], outline=c["accent"])
+                dot.create_oval(self._ui_px(4), self._ui_px(4), self._ui_px(8), self._ui_px(8), fill=c["accent"], outline=c["accent"])
 
         def select(_event=None):
             if available:
@@ -1099,8 +1136,8 @@ class MD2PDFStudioApp:
         self.mode_var = getattr(self, "mode_var", tk.StringVar(value="auto"))
         smart_marker = tk.Canvas(
             smart,
-            width=14,
-            height=14,
+            width=self._ui_px(14),
+            height=self._ui_px(14),
             bg=c["selected"],
             highlightthickness=0,
             bd=0,
@@ -1137,9 +1174,9 @@ class MD2PDFStudioApp:
 
         def redraw_smart_marker(*_):
             smart_marker.delete("all")
-            smart_marker.create_oval(1, 1, 13, 13, outline=c["accent"], width=1)
+            smart_marker.create_oval(self._ui_px(1), self._ui_px(1), self._ui_px(13), self._ui_px(13), outline=c["accent"], width=1)
             if self.mode_var.get() == "auto":
-                smart_marker.create_oval(4, 4, 10, 10, fill=c["accent"], outline=c["accent"])
+                smart_marker.create_oval(self._ui_px(4), self._ui_px(4), self._ui_px(10), self._ui_px(10), fill=c["accent"], outline=c["accent"])
         redraw_smart_marker()
 
         tk.Label(
