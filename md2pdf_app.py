@@ -104,8 +104,12 @@ class MD2PDFStudioApp:
     def __init__(self, root):
         self.root = root
         self.root.title("md2pdf Studio — Markdown to Vector PDF")
-        self.root.geometry("980x760")
-        self.root.minsize(820, 620)
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        width = min(1180, max(900, int(screen_w * 0.84)))
+        height = min(800, max(650, int(screen_h * 0.84)))
+        self.root.geometry(f"{width}x{height}")
+        self.root.minsize(900, 620)
         self.root.configure(bg=THEME["bg_root"])
 
         self.md_path = None
@@ -247,243 +251,649 @@ class MD2PDFStudioApp:
         )
 
     def _build_ui(self):
-        # 1. Header Bar
-        header = ttk.Frame(self.root, style="Header.TFrame")
-        header.pack(fill="x", padx=16, pady=(12, 6))
+        # Root shell
+        shell = tk.Frame(self.root, bg=THEME["bg_root"])
+        shell.pack(fill="both", expand=True, padx=18, pady=14)
 
-        title_box = ttk.Frame(header, style="Header.TFrame")
-        title_box.pack(side="left")
+        # --------------------------------------------------------------
+        # Header
+        # --------------------------------------------------------------
+        header = tk.Frame(shell, bg=THEME["bg_root"])
+        header.pack(fill="x", pady=(0, 10))
 
-        ttk.Label(title_box, text="⚡ md2pdf Studio", style="Title.TLabel").pack(anchor="w")
-        ttk.Label(
-            title_box,
-            text="High-Fidelity Markdown → Vector PDF (Chromium · KaTeX · Mermaid · GFM Alerts)",
-            style="Subtitle.TLabel",
-        ).pack(anchor="w")
+        brand = tk.Frame(header, bg=THEME["bg_root"])
+        brand.pack(side="left", fill="x", expand=True)
 
-        # Telemetry Badges on Top Right
-        badge_box = ttk.Frame(header, style="Header.TFrame")
-        badge_box.pack(side="right", pady=4)
+        brand_line = tk.Frame(brand, bg=THEME["bg_root"])
+        brand_line.pack(anchor="w")
+        tk.Label(
+            brand_line,
+            text="md2pdf",
+            bg=THEME["bg_root"],
+            fg=THEME["text_primary"],
+            font=("Segoe UI", 19, "bold"),
+        ).pack(side="left")
+        tk.Label(
+            brand_line,
+            text="  STUDIO",
+            bg=THEME["bg_root"],
+            fg=THEME["accent_cyan"],
+            font=("Segoe UI", 9, "bold"),
+        ).pack(side="left", pady=(7, 0))
 
-        self._create_telemetry_pill(badge_box, "Chromium", self.sidebar_ok, "Chrome/Edge available")
-        self._create_telemetry_pill(badge_box, "Pandoc", self.have.get("pandoc", False), "Pandoc available")
-        self._create_telemetry_pill(badge_box, "LaTeX", self.latex_ok, "pdflatex + tcolorbox", optional=True)
-        self._create_telemetry_pill(badge_box, "wkhtml", self.simple_ok, "wkhtmltopdf", optional=True)
+        tk.Label(
+            brand,
+            text="Markdown → reliable PDF, without the clutter.",
+            bg=THEME["bg_root"],
+            fg=THEME["text_muted"],
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(1, 0))
 
-        # 2. Action Toolbar
-        toolbar = tk.Frame(self.root, bg=THEME["bg_card"], bd=1, relief="solid")
-        toolbar.pack(fill="x", padx=16, pady=4)
+        health = tk.Frame(header, bg=THEME["bg_root"])
+        health.pack(side="right", pady=(5, 0))
+        health_items = [
+            ("Chromium", self.sidebar_ok),
+            ("Pandoc", self.have.get("pandoc", False)),
+            ("LaTeX", self.latex_ok),
+            ("wkhtml", self.have.get("wkhtmltopdf", False)),
+        ]
+        for name, ok in health_items:
+            tk.Label(
+                health,
+                text=("● " if ok else "○ ") + name,
+                bg=THEME["bg_root"],
+                fg=THEME["accent_emerald"] if ok else THEME["text_muted"],
+                font=("Segoe UI", 8, "bold"),
+            ).pack(side="left", padx=(0, 10))
 
-        tool_inner = ttk.Frame(toolbar, style="Card.TFrame")
-        tool_inner.pack(fill="x", padx=8, pady=6)
+        # --------------------------------------------------------------
+        # Command bar
+        # --------------------------------------------------------------
+        command = tk.Frame(
+            shell,
+            bg=THEME["bg_card"],
+            highlightbackground=THEME["border"],
+            highlightthickness=1,
+        )
+        command.pack(fill="x")
 
-        ttk.Button(
-            tool_inner,
-            text="📂 Open .md File",
-            command=self.open_file,
-            style="Secondary.TButton",
-        ).pack(side="left", padx=(0, 6))
+        command_left = tk.Frame(command, bg=THEME["bg_card"])
+        command_left.pack(side="left", padx=7, pady=7)
 
-        ttk.Button(
-            tool_inner,
-            text="📋 Paste Clipboard",
-            command=self.paste_clipboard,
-            style="Secondary.TButton",
-        ).pack(side="left", padx=6)
-
-        ttk.Button(
-            tool_inner,
-            text="🧹 Clear",
-            command=self.clear_editor,
-            style="Secondary.TButton",
-        ).pack(side="left", padx=6)
+        ttk.Button(command_left, text="New", command=self.new_document, style="Secondary.TButton").pack(side="left", padx=3)
+        ttk.Button(command_left, text="Open", command=self.open_file, style="Secondary.TButton").pack(side="left", padx=3)
+        ttk.Button(command_left, text="Paste", command=self.paste_clipboard, style="Secondary.TButton").pack(side="left", padx=3)
+        ttk.Button(command_left, text="Clear", command=self.clear_editor, style="Secondary.TButton").pack(side="left", padx=3)
 
         self.file_label = tk.Label(
-            tool_inner,
-            text="📄 Scratchpad / No file loaded",
-            bg=THEME["bg_input"],
+            command,
+            text="Scratchpad · No file loaded",
+            bg=THEME["bg_card"],
             fg=THEME["text_secondary"],
-            font=("Segoe UI", 9),
-            padx=10,
-            pady=4,
-            relief="solid",
-            bd=1,
+            font=("Segoe UI", 9, "bold"),
+            anchor="w",
         )
-        self.file_label.pack(side="left", padx=10)
+        self.file_label.pack(side="left", padx=(12, 8), fill="x", expand=True)
 
-        # 3. Conversion Mode Card
-        mode_card = tk.Frame(self.root, bg=THEME["bg_card"], bd=1, relief="solid")
-        mode_card.pack(fill="x", padx=16, pady=6)
-
-        mode_inner = ttk.Frame(mode_card, style="Card.TFrame")
-        mode_inner.pack(fill="x", padx=10, pady=8)
-
-        ttk.Label(mode_inner, text="ENGINE SELECTION", style="CardTitle.TLabel").pack(anchor="w", pady=(0, 4))
-
-        default_mode = "sidebar_light" if self.sidebar_ok else ("latex" if self.latex_ok else "simple")
-        self.mode_var = tk.StringVar(value=default_mode)
-
-        row_modes = ttk.Frame(mode_inner, style="Card.TFrame")
-        row_modes.pack(fill="x")
-
-        ttk.Radiobutton(
-            row_modes,
-            text="☀️ Sidebar Light (Print Paper + KaTeX + SVG Mermaid)",
-            variable=self.mode_var,
-            value="sidebar_light",
-            style="Card.TRadiobutton",
-        ).pack(side="left", padx=(0, 14))
-
-        ttk.Radiobutton(
-            row_modes,
-            text="🌙 Sidebar Dark (IDE Dark Theme)",
-            variable=self.mode_var,
-            value="sidebar_dark",
-            style="Card.TRadiobutton",
-        ).pack(side="left", padx=14)
-
-
-        ttk.Radiobutton(
-            row_modes,
-            text="📐 LaTeX Formal (pdflatex)",
-            variable=self.mode_var,
-            value="latex",
-            style="Card.TRadiobutton",
-        ).pack(side="left", padx=14)
-
-        ttk.Radiobutton(
-            row_modes,
-            text="⚡ Simple (wkhtmltopdf)",
-            variable=self.mode_var,
-            value="simple",
-            style="Card.TRadiobutton",
-        ).pack(side="left", padx=14)
-
-        # Auto-detect notification pill
         self.auto_detect_var = tk.BooleanVar(value=True)
-        row_detect = ttk.Frame(mode_inner, style="Card.TFrame")
-        row_detect.pack(fill="x", pady=(6, 0))
-
-        ttk.Checkbutton(
-            row_detect,
-            text="Auto-detect engine from content",
+        tk.Checkbutton(
+            command,
+            text="Smart detect",
             variable=self.auto_detect_var,
-            style="Card.TCheckbutton",
-        ).pack(side="left")
+            command=self._run_auto_detect,
+            bg=THEME["bg_card"],
+            fg=THEME["text_secondary"],
+            activebackground=THEME["bg_card"],
+            activeforeground=THEME["text_primary"],
+            selectcolor=THEME["bg_card_hover"],
+            font=("Segoe UI", 9),
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+        ).pack(side="right", padx=(5, 8))
 
-        self.detect_label = tk.Label(
-            row_detect,
-            text="Ready to detect syntax",
+        # --------------------------------------------------------------
+        # Main workspace: editor + export controls
+        # --------------------------------------------------------------
+        workspace = tk.PanedWindow(
+            shell,
+            orient="horizontal",
+            bg=THEME["bg_root"],
+            bd=0,
+            sashwidth=7,
+            sashrelief="flat",
+            opaqueresize=True,
+        )
+        workspace.pack(fill="both", expand=True, pady=(10, 10))
+
+        # Editor panel
+        editor_card = tk.Frame(
+            workspace,
+            bg=THEME["bg_card"],
+            highlightbackground=THEME["border"],
+            highlightthickness=1,
+        )
+        workspace.add(editor_card, minsize=560)
+
+        editor_header = tk.Frame(editor_card, bg=THEME["bg_card"])
+        editor_header.pack(fill="x", padx=15, pady=(13, 7))
+
+        left_meta = tk.Frame(editor_header, bg=THEME["bg_card"])
+        left_meta.pack(side="left")
+        tk.Label(
+            left_meta,
+            text="MARKDOWN SOURCE",
             bg=THEME["bg_card"],
             fg=THEME["text_muted"],
-            font=("Segoe UI", 8, "italic"),
-        )
-        self.detect_label.pack(side="left", padx=12)
+            font=("Segoe UI", 8, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            left_meta,
+            text="Write your document",
+            bg=THEME["bg_card"],
+            fg=THEME["text_primary"],
+            font=("Segoe UI", 12, "bold"),
+        ).pack(anchor="w", pady=(1, 0))
 
-        # 4. Markdown Editor Frame
-        editor_card = tk.Frame(self.root, bg=THEME["bg_card"], bd=1, relief="solid")
-        editor_card.pack(fill="both", expand=True, padx=16, pady=4)
+        editor_tools = tk.Frame(editor_header, bg=THEME["bg_card"])
+        editor_tools.pack(side="right", pady=(7, 0))
+        self.wrap_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            editor_tools,
+            text="Wrap",
+            variable=self.wrap_var,
+            command=lambda: self.text.config(wrap="word" if self.wrap_var.get() else "none"),
+            bg=THEME["bg_card"],
+            fg=THEME["text_muted"],
+            activebackground=THEME["bg_card"],
+            activeforeground=THEME["text_primary"],
+            selectcolor=THEME["bg_card_hover"],
+            font=("Segoe UI", 8),
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+        ).pack(side="right")
+
+        editor_shell = tk.Frame(
+            editor_card,
+            bg=THEME["bg_input"],
+            highlightbackground=THEME["border"],
+            highlightthickness=1,
+        )
+        editor_shell.pack(fill="both", expand=True, padx=12)
 
         self.text = scrolledtext.ScrolledText(
-            editor_card,
+            editor_shell,
             wrap="word",
-            font=("Consolas", 10),
+            font=("Cascadia Mono", 11),
             bg=THEME["bg_input"],
-            fg="#f8fafc",
+            fg=THEME["text_primary"],
             insertbackground=THEME["accent_cyan"],
-            selectbackground="#1e3a8a",
-            selectforeground="#ffffff",
+            selectbackground="#21477d",
+            selectforeground=THEME["text_primary"],
+            padx=17,
+            pady=15,
             bd=0,
-            padx=10,
-            pady=10,
+            relief="flat",
+            highlightthickness=0,
             undo=True,
+            maxundo=-1,
         )
-        self.text.pack(fill="both", expand=True, padx=2, pady=2)
-        self._detect_after_id = None
-        self.text.bind("<<Modified>>", self._on_text_modified)
-        self.text.bind("<KeyRelease>", self._update_stats)
+        self.text.pack(fill="both", expand=True)
 
-        # Editor Statistics Ribbon
+        self.text.tag_configure(
+            "current_line",
+            background="#0f1b2c",
+        )
+
+        self.editor_placeholder = tk.Label(
+            editor_shell,
+            text=(
+                "Start with Markdown\n\n"
+                "# Your title\n"
+                "Write normally — headings, tables, code, math, Mermaid and alerts are supported.\n\n"
+                "Tip: use Ctrl+O to open a .md file."
+            ),
+            bg=THEME["bg_input"],
+            fg=THEME["text_muted"],
+            font=("Segoe UI", 10),
+            justify="left",
+            anchor="nw",
+            padx=20,
+            pady=22,
+        )
+        self.editor_placeholder.place(x=0, y=0, relwidth=1, relheight=1)
+        self.editor_placeholder.bind("<Button-1>", lambda _e: self.text.focus_set())
+
+        editor_footer = tk.Frame(editor_card, bg=THEME["bg_card"])
+        editor_footer.pack(fill="x", padx=15, pady=(7, 11))
         self.stats_bar = tk.Label(
-            editor_card,
-            text="Lines: 0  •  Words: 0  •  Characters: 0",
+            editor_footer,
+            text="Lines: 0  ·  Words: 0  ·  Characters: 0",
             bg=THEME["bg_card"],
             fg=THEME["text_muted"],
             font=("Segoe UI", 8),
-            anchor="e",
-            padx=10,
-            pady=2,
         )
-        self.stats_bar.pack(fill="x")
+        self.stats_bar.pack(side="left")
+        self.cursor_label = tk.Label(
+            editor_footer,
+            text="Ln 1, Col 1",
+            bg=THEME["bg_card"],
+            fg=THEME["text_muted"],
+            font=("Segoe UI", 8),
+        )
+        self.cursor_label.pack(side="right")
 
-        # 5. Export Footer
-        footer = tk.Frame(self.root, bg=THEME["bg_card"], bd=1, relief="solid")
-        footer.pack(fill="x", padx=16, pady=(6, 12))
+        self.text.bind("<<Modified>>", self._on_text_modified)
+        self.text.bind("<KeyRelease>", self._editor_event)
+        self.text.bind("<ButtonRelease>", self._editor_event)
+        self.text.edit_modified(False)
 
-        footer_inner = ttk.Frame(footer, style="Card.TFrame")
-        footer_inner.pack(fill="x", padx=12, pady=8)
+        # Export panel
+        side = tk.Frame(
+            workspace,
+            bg=THEME["bg_card"],
+            highlightbackground=THEME["border"],
+            highlightthickness=1,
+            width=350,
+        )
+        workspace.add(side, minsize=330)
 
-        # Left options
-        opts_box = ttk.Frame(footer_inner, style="Card.TFrame")
-        opts_box.pack(side="left")
+        side_body = tk.Frame(side, bg=THEME["bg_card"])
+        side_body.pack(fill="both", expand=True, padx=15, pady=15)
 
         tk.Label(
-            opts_box,
-            text="Page Margins:",
+            side_body,
+            text="EXPORT",
+            bg=THEME["bg_card"],
+            fg=THEME["text_muted"],
+            font=("Segoe UI", 8, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            side_body,
+            text="PDF profile",
+            bg=THEME["bg_card"],
+            fg=THEME["text_primary"],
+            font=("Segoe UI", 14, "bold"),
+        ).pack(anchor="w", pady=(1, 2))
+        tk.Label(
+            side_body,
+            text="Use Smart Detect for most documents, or choose a renderer explicitly.",
+            bg=THEME["bg_card"],
+            fg=THEME["text_muted"],
+            font=("Segoe UI", 8),
+            wraplength=305,
+            justify="left",
+        ).pack(anchor="w", pady=(0, 11))
+
+        smart = tk.Frame(
+            side_body,
+            bg=THEME["bg_card_hover"],
+            highlightbackground=THEME["accent_cyan"],
+            highlightthickness=1,
+        )
+        smart.pack(fill="x")
+        self.mode_var = tk.StringVar(value="auto")
+
+        tk.Radiobutton(
+            smart,
+            variable=self.mode_var,
+            value="auto",
+            command=self._render_mode_cards,
+            bg=THEME["bg_card_hover"],
+            activebackground=THEME["bg_card_hover"],
+            selectcolor=THEME["accent_blue"],
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+        ).pack(side="left", padx=(10, 2), pady=10)
+
+        smart_copy = tk.Frame(smart, bg=THEME["bg_card_hover"])
+        smart_copy.pack(side="left", fill="x", expand=True, padx=(2, 10), pady=9)
+        tk.Label(
+            smart_copy,
+            text="Smart Detect",
+            bg=THEME["bg_card_hover"],
+            fg=THEME["text_primary"],
+            font=("Segoe UI", 10, "bold"),
+        ).pack(anchor="w")
+        self.detect_label = tk.Label(
+            smart_copy,
+            text="Ready to inspect the document.",
+            bg=THEME["bg_card_hover"],
+            fg=THEME["accent_cyan"],
+            font=("Segoe UI", 8),
+            wraplength=260,
+            justify="left",
+        )
+        self.detect_label.pack(anchor="w", pady=(3, 0))
+
+        tk.Label(
+            side_body,
+            text="RENDERER",
+            bg=THEME["bg_card"],
+            fg=THEME["text_muted"],
+            font=("Segoe UI", 8, "bold"),
+        ).pack(anchor="w", pady=(14, 7))
+
+        cards = tk.Frame(side_body, bg=THEME["bg_card"])
+        cards.pack(fill="x")
+        cards.columnconfigure(0, weight=1)
+        cards.columnconfigure(1, weight=1)
+
+        self._mode_cards = {}
+        self._mode_card_labels = {}
+        renderer_info = [
+            ("sidebar_light", "Sidebar Light", "Print layout", self.sidebar_ok),
+            ("sidebar_dark", "Sidebar Dark", "IDE-style output", self.sidebar_ok),
+            ("latex", "LaTeX Formal", "Academic typesetting", self.latex_ok),
+            ("simple", "Simple", "HTML PDF fallback", self.simple_ok),
+        ]
+        for i, (value, title, desc, available) in enumerate(renderer_info):
+            card = tk.Frame(
+                cards,
+                bg=THEME["bg_input"],
+                highlightbackground=THEME["border"],
+                highlightthickness=1,
+                cursor="hand2" if available else "arrow",
+            )
+            card.grid(row=i // 2, column=i % 2, sticky="nsew", padx=3, pady=3)
+            card.columnconfigure(0, weight=1)
+            self._mode_cards[value] = card
+
+            row = tk.Frame(card, bg=THEME["bg_input"])
+            row.pack(fill="x", padx=9, pady=(8, 2))
+            title_label = tk.Label(
+                row,
+                text=title,
+                bg=THEME["bg_input"],
+                fg=THEME["text_primary"] if available else THEME["text_muted"],
+                font=("Segoe UI", 8, "bold"),
+            )
+            title_label.pack(side="left")
+            tk.Label(
+                row,
+                text="●" if available else "○",
+                bg=THEME["bg_input"],
+                fg=THEME["accent_emerald"] if available else THEME["text_muted"],
+                font=("Segoe UI", 7),
+            ).pack(side="right")
+            desc_label = tk.Label(
+                card,
+                text=desc,
+                bg=THEME["bg_input"],
+                fg=THEME["text_muted"],
+                font=("Segoe UI", 7),
+                anchor="w",
+                justify="left",
+            )
+            desc_label.pack(fill="x", padx=9, pady=(0, 8))
+            self._mode_card_labels[value] = (title_label, desc_label)
+
+            if available:
+                handler = lambda _e, v=value: self._select_mode(v)
+                for widget in (card, row, title_label, desc_label):
+                    widget.bind("<Button-1>", handler)
+
+        tk.Frame(side_body, height=1, bg=THEME["border"]).pack(fill="x", pady=14)
+
+        tk.Label(
+            side_body,
+            text="PDF SETTINGS",
+            bg=THEME["bg_card"],
+            fg=THEME["text_muted"],
+            font=("Segoe UI", 8, "bold"),
+        ).pack(anchor="w")
+
+        settings = tk.Frame(side_body, bg=THEME["bg_card"])
+        settings.pack(fill="x", pady=(7, 0))
+
+        tk.Label(
+            settings,
+            text="Margins",
             bg=THEME["bg_card"],
             fg=THEME["text_secondary"],
             font=("Segoe UI", 9),
-        ).pack(side="left", padx=(0, 6))
+        ).grid(row=0, column=0, sticky="w", pady=(0, 7))
 
         self.margin_var = tk.StringVar(value="14mm")
-        margin_combo = ttk.Combobox(
-            opts_box,
+        ttk.Combobox(
+            settings,
             textvariable=self.margin_var,
             values=["10mm", "14mm", "20mm", "0.5in", "0.75in"],
-            width=7,
-        )
-        margin_combo.pack(side="left", padx=4)
+            state="readonly",
+            width=9,
+            style="Dark.TCombobox",
+        ).grid(row=0, column=1, sticky="e", pady=(0, 7))
+
+        tk.Label(
+            settings,
+            text="After export",
+            bg=THEME["bg_card"],
+            fg=THEME["text_secondary"],
+            font=("Segoe UI", 9),
+        ).grid(row=1, column=0, sticky="w")
 
         self.open_pdf_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            opts_box,
-            text="Open PDF after export",
+        tk.Checkbutton(
+            settings,
+            text="Open PDF automatically",
             variable=self.open_pdf_var,
-            style="Card.TCheckbutton",
-        ).pack(side="left", padx=16)
+            bg=THEME["bg_card"],
+            fg=THEME["text_secondary"],
+            activebackground=THEME["bg_card"],
+            activeforeground=THEME["text_primary"],
+            selectcolor=THEME["bg_card_hover"],
+            font=("Segoe UI", 8),
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+        ).grid(row=1, column=1, sticky="e")
 
-        # Right CTA
-        cta_box = ttk.Frame(footer_inner, style="Card.TFrame")
-        cta_box.pack(side="right")
+        tk.Frame(side_body, height=1, bg=THEME["border"]).pack(fill="x", pady=14)
+
+        env_head = tk.Frame(side_body, bg=THEME["bg_card"])
+        env_head.pack(fill="x")
+        tk.Label(
+            env_head,
+            text="ENVIRONMENT",
+            bg=THEME["bg_card"],
+            fg=THEME["text_muted"],
+            font=("Segoe UI", 8, "bold"),
+        ).pack(side="left")
+
+        self.environment_expanded = False
+        self.environment_button = tk.Button(
+            env_head,
+            text="Show",
+            command=self._toggle_environment,
+            bg=THEME["bg_card"],
+            fg=THEME["accent_cyan"],
+            activebackground=THEME["bg_card"],
+            activeforeground=THEME["text_primary"],
+            font=("Segoe UI", 8, "bold"),
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+        )
+        self.environment_button.pack(side="right")
+
+        self.environment_frame = tk.Frame(side_body, bg=THEME["bg_card"])
+
+        env_summary = f"{sum(1 for ok in self.have.values() if ok)}/{len(self.have)} native tools detected"
+        tk.Label(
+            side_body,
+            text=env_summary,
+            bg=THEME["bg_card"],
+            fg=THEME["text_muted"],
+            font=("Segoe UI", 8),
+        ).pack(anchor="w", pady=(7, 0))
+
+        # --------------------------------------------------------------
+        # Bottom status / primary action
+        # --------------------------------------------------------------
+        bottom = tk.Frame(
+            shell,
+            bg=THEME["bg_card"],
+            highlightbackground=THEME["border"],
+            highlightthickness=1,
+        )
+        bottom.pack(fill="x")
+
+        status_left = tk.Frame(bottom, bg=THEME["bg_card"])
+        status_left.pack(side="left", fill="x", expand=True, padx=12, pady=9)
+
+        self.status = tk.Label(
+            status_left,
+            text="Ready",
+            bg=THEME["bg_card"],
+            fg=THEME["accent_emerald"],
+            font=("Segoe UI", 9, "bold"),
+            anchor="w",
+        )
+        self.status.pack(side="left")
 
         self.open_folder_btn = ttk.Button(
-            cta_box,
-            text="📁 Show in Folder",
+            bottom,
+            text="Reveal output",
             command=self.open_output_folder,
             style="Secondary.TButton",
             state="disabled",
         )
-        self.open_folder_btn.pack(side="left", padx=(0, 8))
+        self.open_folder_btn.pack(side="right", padx=(0, 8), pady=8)
 
         self.convert_btn = ttk.Button(
-            cta_box,
-            text="🚀 Export to PDF",
+            bottom,
+            text="Export PDF",
             command=self.convert,
             style="Primary.TButton",
         )
-        self.convert_btn.pack(side="right")
+        self.convert_btn.pack(side="right", padx=(0, 8), pady=8)
 
-        # 6. Status Bar
-        self.status = tk.Label(
-            self.root,
-            text="● Ready",
-            bg=THEME["bg_root"],
-            fg=THEME["accent_emerald"],
-            font=("Segoe UI", 9),
-            anchor="w",
-            padx=20,
+        self.progress = ttk.Progressbar(
+            bottom,
+            mode="indeterminate",
+            length=85,
         )
-        self.status.pack(fill="x", pady=(0, 6))
+        self.progress.pack(side="right", padx=(0, 5), pady=8)
+
+        self._update_mode_cards()
+        self._update_placeholder()
+        self._update_cursor_status()
+
+    def _make_status(self, parent, text, ok=True):
+        return tk.Label(
+            parent,
+            text=("● " if ok else "○ ") + text,
+            bg=THEME["bg_card"],
+            fg=THEME["accent_emerald"] if ok else THEME["text_muted"],
+            font=("Segoe UI", 8, "bold"),
+        )
+
+    def _editor_event(self, _event=None):
+        self._update_stats()
+        self._update_cursor_status()
+        self._update_current_line()
+        self._update_placeholder()
+
+    def _update_placeholder(self):
+        if not hasattr(self, "editor_placeholder"):
+            return
+        content = self.text.get("1.0", "end-1c")
+        if content.strip():
+            self.editor_placeholder.place_forget()
+        else:
+            self.editor_placeholder.place(x=0, y=0, relwidth=1, relheight=1)
+
+    def _update_cursor_status(self):
+        if not hasattr(self, "cursor_label"):
+            return
+        try:
+            line, col = self.text.index(tk.INSERT).split(".")
+            self.cursor_label.config(text=f"Ln {int(line):,}, Col {int(col) + 1:,}")
+        except (tk.TclError, ValueError):
+            pass
+
+    def _update_current_line(self):
+        if not hasattr(self, "text"):
+            return
+        try:
+            self.text.tag_remove("current_line", "1.0", "end")
+            line = self.text.index(tk.INSERT).split(".")[0]
+            self.text.tag_add("current_line", f"{line}.0", f"{line}.0 lineend+1c")
+        except tk.TclError:
+            pass
+
+    def _select_mode(self, mode):
+        available = {
+            "sidebar_light": self.sidebar_ok,
+            "sidebar_dark": self.sidebar_ok,
+            "latex": self.latex_ok,
+            "simple": self.simple_ok,
+        }.get(mode, False)
+        if not available:
+            self._set_status("That renderer is unavailable on this machine.", THEME["accent_amber"])
+            return
+        self.mode_var.set(mode)
+        self._update_mode_cards()
+        self._run_auto_detect()
+
+    def _render_mode_cards(self):
+        self._update_mode_cards()
+
+    def _update_mode_cards(self):
+        selected = self.mode_var.get() if hasattr(self, "mode_var") else ""
+        for value, card in getattr(self, "_mode_cards", {}).items():
+            active = value == selected
+            card.configure(
+                bg=THEME["bg_card_hover"] if active else THEME["bg_input"],
+                highlightbackground=THEME["accent_cyan"] if active else THEME["border"],
+            )
+            for child in card.winfo_children():
+                child.configure(bg=THEME["bg_card_hover"] if active else THEME["bg_input"])
+                for nested in child.winfo_children():
+                    nested.configure(bg=THEME["bg_card_hover"] if active else THEME["bg_input"])
+
+    def _toggle_environment(self):
+        self.environment_expanded = not self.environment_expanded
+        if self.environment_expanded:
+            self.environment_button.config(text="Hide")
+            self.environment_frame.pack(fill="x", pady=(8, 0))
+            for child in self.environment_frame.winfo_children():
+                child.destroy()
+            labels = {
+                "pandoc": "Pandoc",
+                "chromium": "Chromium",
+                "pdflatex": "LaTeX",
+                "wkhtmltopdf": "wkhtmltopdf",
+            }
+            for key, label in labels.items():
+                ok = self.have.get(key, False)
+                tk.Label(
+                    self.environment_frame,
+                    text=("● " if ok else "○ ") + label,
+                    bg=THEME["bg_card"],
+                    fg=THEME["accent_emerald"] if ok else THEME["text_muted"],
+                    font=("Segoe UI", 8),
+                    anchor="w",
+                ).pack(anchor="w", pady=1)
+        else:
+            self.environment_button.config(text="Show")
+            self.environment_frame.pack_forget()
+
+    def new_document(self):
+        self.text.delete("1.0", "end")
+        self.md_path = None
+        self.file_label.config(text="Scratchpad · No file loaded")
+        self.stats_bar.config(text="Lines: 0  ·  Words: 0  ·  Characters: 0")
+        self._set_status("New document", THEME["text_secondary"])
+        self._update_placeholder()
+        self._run_auto_detect()
+
+    def _set_status(self, text, color):
+        if hasattr(self, "status"):
+            self.status.config(text=text, fg=color)
 
     def _create_telemetry_pill(self, parent, name, is_ok, tooltip_text, optional=False):
         color = THEME["accent_emerald"] if is_ok else (THEME["text_muted"] if optional else THEME["accent_rose"])
@@ -566,7 +976,7 @@ class MD2PDFStudioApp:
         self.text.delete("1.0", "end")
         self.text.insert("1.0", content)
         self.md_path = path
-        self.file_label.config(text=f"📄 {os.path.basename(path)}")
+        self.file_label.config(text=os.path.basename(path))
         self._update_stats()
         self._run_auto_detect()
 
@@ -584,7 +994,7 @@ class MD2PDFStudioApp:
         if messagebox.askyesno("Clear Editor", "Clear all content from the editor?"):
             self.text.delete("1.0", "end")
             self.md_path = None
-            self.file_label.config(text="📄 Scratchpad / No file loaded")
+            self.file_label.config(text="Scratchpad · No file loaded")
             self._update_stats()
             self._run_auto_detect()
 
@@ -734,6 +1144,7 @@ class MD2PDFStudioApp:
 
 
 def main():
+    _enable_windows_thread_dpi_awareness()
     root = tk.Tk()
     app = MD2PDFStudioApp(root)
     root.mainloop()
