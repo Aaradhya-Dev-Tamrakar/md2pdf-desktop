@@ -883,12 +883,21 @@ class MD2PDFStudioApp:
             self.environment_frame.pack_forget()
 
     def new_document(self):
+        if self.text.get("1.0", "end-1c").strip():
+            if not messagebox.askyesno(
+                "New document",
+                "Replace the current Markdown content with a new document?",
+            ):
+                return
+
         self.text.delete("1.0", "end")
+        self.text.edit_modified(False)
         self.md_path = None
         self.file_label.config(text="Scratchpad · No file loaded")
         self.stats_bar.config(text="Lines: 0  ·  Words: 0  ·  Characters: 0")
         self._set_status("New document", THEME["text_secondary"])
         self._update_placeholder()
+        self._update_current_line()
         self._run_auto_detect()
 
     def _set_status(self, text, color):
@@ -927,57 +936,98 @@ class MD2PDFStudioApp:
 
     def _run_auto_detect(self):
         self._detect_after_id = None
+        if not hasattr(self, "detect_label"):
+            return
+
         if not self.auto_detect_var.get():
-            self.detect_label.config(text="", fg=THEME["text_muted"])
+            self.detect_label.config(
+                text="Smart detection is off.",
+                fg=THEME["text_muted"],
+            )
             return
 
         content = self.text.get("1.0", "end")
         if not content.strip():
-            self.detect_label.config(text="Empty document", fg=THEME["text_muted"])
+            self.detect_label.config(
+                text="Ready to inspect the document.",
+                fg=THEME["accent_cyan"],
+            )
+            return
+
+        # A manual selection is authoritative; detection only explains it.
+        current_mode = self.mode_var.get()
+        if current_mode in ("sidebar_light", "sidebar_dark", "latex", "simple"):
+            self.detect_label.config(
+                text=f"Manual renderer: {self._friendly_mode_name(current_mode)}",
+                fg=THEME["text_secondary"],
+            )
             return
 
         needed_sidebar, reason_sidebar = detect_sidebar_needed(content)
         if needed_sidebar and self.sidebar_ok:
             self.detect_label.config(
-                text=f"⚡ Auto-detected: {reason_sidebar} → Sidebar Mode selected",
+                text=f"Detected: {reason_sidebar}",
                 fg=THEME["accent_cyan"],
             )
-            current_mode = self.mode_var.get()
-            if current_mode not in ("sidebar_dark", "sidebar_light"):
-                self.mode_var.set("sidebar_dark")
             return
 
         needed_latex, reason_latex = detect_latex_needed(content)
-        if needed_latex:
-            if self.latex_ok:
-                self.detect_label.config(
-                    text=f"📐 Auto-detected: {reason_latex} → LaTeX Mode selected",
-                    fg=THEME["accent_emerald"],
-                )
-                self.mode_var.set("latex")
-            else:
-                self.detect_label.config(
-                    text=f"⚠ Detected {reason_latex}, but LaTeX compiler is missing",
-                    fg=THEME["accent_amber"],
-                )
-        else:
-            self.detect_label.config(text="Plain document → Standard conversion", fg=THEME["text_muted"])
+        if needed_latex and self.latex_ok:
+            self.detect_label.config(
+                text=f"Detected: {reason_latex}",
+                fg=THEME["accent_emerald"],
+            )
+            return
+
+        if needed_latex and not self.latex_ok:
+            self.detect_label.config(
+                text="Math detected; LaTeX unavailable. Smart mode will use a fallback.",
+                fg=THEME["accent_amber"],
+            )
+            return
+
+        self.detect_label.config(
+            text="No special features detected; standard renderer is sufficient.",
+            fg=THEME["text_secondary"],
+        )
+
+    def _friendly_mode_name(self, mode):
+        return {
+            "sidebar_light": "Sidebar Light",
+            "sidebar_dark": "Sidebar Dark",
+            "latex": "LaTeX Formal",
+            "simple": "Simple",
+            "auto": "Smart Detect",
+        }.get(mode, mode)
 
     def open_file(self):
         path = filedialog.askopenfilename(
-            title="Select Markdown File",
-            filetypes=[("Markdown Files", "*.md *.markdown *.txt"), ("All Files", "*.*")],
+            title="Open Markdown",
+            filetypes=[
+                ("Markdown files", "*.md *.markdown"),
+                ("Text files", "*.txt"),
+                ("All files", "*.*"),
+            ],
         )
         if not path:
             return
-        with open(path, "r", encoding="utf-8") as f:
-            content = f.read()
+
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                content = handle.read()
+        except (OSError, UnicodeError) as exc:
+            messagebox.showerror("Open failed", str(exc))
+            return
 
         self.text.delete("1.0", "end")
         self.text.insert("1.0", content)
+        self.text.edit_modified(False)
         self.md_path = path
         self.file_label.config(text=os.path.basename(path))
         self._update_stats()
+        self._update_placeholder()
+        self._update_current_line()
+        self._set_status(f"Opened {os.path.basename(path)}", THEME["accent_emerald"])
         self._run_auto_detect()
 
     def paste_clipboard(self):
