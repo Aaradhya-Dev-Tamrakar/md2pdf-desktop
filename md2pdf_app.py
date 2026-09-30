@@ -724,7 +724,7 @@ class MD2PDFStudioApp:
             font=("Segoe UI", 8),
         ).pack(side="left", padx=(0, 5))
 
-        self.auto_detect_var = tk.BooleanVar(value=True)
+        self.auto_detect_var = getattr(self, "auto_detect_var", tk.BooleanVar(value=True))
         tk.Checkbutton(
             auto_text,
             variable=self.auto_detect_var,
@@ -898,7 +898,7 @@ class MD2PDFStudioApp:
         )
         smart.pack(fill="x")
 
-        self.mode_var = tk.StringVar(value="auto")
+        self.mode_var = getattr(self, "mode_var", tk.StringVar(value="auto"))
         tk.Radiobutton(
             smart,
             variable=self.mode_var,
