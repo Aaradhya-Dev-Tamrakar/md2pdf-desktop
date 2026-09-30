@@ -590,6 +590,137 @@ class MD2PDFStudioApp:
         style = "MDPrimary.TButton" if primary else "MD.TButton"
         return ttk.Button(parent, text=text, command=command, style=style, **kwargs)
 
+    def _make_toggle(self, parent, variable, command=None, label=None):
+        """Create a DPI-stable custom toggle without native Tk indicators."""
+        c = self._colors()
+        row = tk.Frame(parent, bg=c["surface"], cursor="hand2")
+        track = tk.Canvas(
+            row,
+            width=34,
+            height=18,
+            bg=c["surface"],
+            highlightthickness=0,
+            bd=0,
+        )
+        track.pack(side="left")
+
+        text_label = None
+        if label:
+            text_label = tk.Label(
+                row,
+                text=label,
+                bg=c["surface"],
+                fg=c["text_2"],
+                font=("Segoe UI", 8),
+            )
+            text_label.pack(side="left", padx=(6, 0))
+
+        def redraw(*_):
+            track.delete("all")
+            on = bool(variable.get())
+            fill = c["accent"] if on else c["surface_3"]
+            outline = c["accent"] if on else c["border"]
+            track.create_rounded_rectangle if hasattr(track, "create_rounded_rectangle") else None
+            track.create_rectangle(
+                2, 3, 32, 15,
+                fill=fill,
+                outline=outline,
+                width=1,
+            )
+            knob_x = 25 if on else 9
+            track.create_oval(
+                knob_x - 4, 5, knob_x + 4, 13,
+                fill="#ffffff",
+                outline="#ffffff",
+            )
+
+        def toggle(_event=None):
+            variable.set(not variable.get())
+            redraw()
+            if command:
+                command()
+
+        variable.trace_add("write", redraw)
+        for widget in (row, track):
+            widget.bind("<Button-1>", toggle)
+        if text_label:
+            text_label.bind("<Button-1>", toggle)
+        redraw()
+        return row
+
+    def _make_choice_card(self, parent, value, title, desc, selected_getter, command, available=True):
+        c = self._colors()
+        card = tk.Frame(
+            parent,
+            bg=c["input"],
+            highlightbackground=c["border"],
+            highlightthickness=1,
+            cursor="hand2" if available else "arrow",
+        )
+        title_row = tk.Frame(card, bg=c["input"])
+        title_row.pack(fill="x", padx=9, pady=(8, 2))
+
+        dot = tk.Canvas(
+            title_row,
+            width=12,
+            height=12,
+            bg=c["input"],
+            highlightthickness=0,
+            bd=0,
+        )
+        dot.pack(side="left", padx=(0, 5))
+
+        title_label = tk.Label(
+            title_row,
+            text=title,
+            bg=c["input"],
+            fg=c["text"] if available else c["text_3"],
+            font=("Segoe UI", 8, "bold"),
+        )
+        title_label.pack(side="left")
+
+        tk.Label(
+            card,
+            text=desc,
+            bg=c["input"],
+            fg=c["text_3"],
+            font=("Segoe UI", 7),
+            anchor="w",
+        ).pack(fill="x", padx=9, pady=(0, 8))
+
+        def refresh():
+            active = selected_getter()
+            bg = c["selected"] if active else c["input"]
+            card.config(
+                bg=bg,
+                highlightbackground=c["accent"] if active else c["border"],
+            )
+            for child in card.winfo_children():
+                child.config(bg=bg)
+                for nested in child.winfo_children():
+                    nested.config(bg=bg)
+            dot.delete("all")
+            center = 6
+            dot.create_oval(
+                1, 1, 11, 11,
+                fill=bg,
+                outline=c["accent"] if active else c["border"],
+                width=1,
+            )
+            if active:
+                dot.create_oval(4, 4, 8, 8, fill=c["accent"], outline=c["accent"])
+
+        def select(_event=None):
+            if available:
+                command(value)
+                refresh()
+
+        if available:
+            for widget in (card, title_row, dot, title_label):
+                widget.bind("<Button-1>", select)
+        refresh()
+        return card, refresh
+
     # ------------------------------------------------------------------
     # UI
     # ------------------------------------------------------------------
@@ -801,18 +932,10 @@ class MD2PDFStudioApp:
         ).pack(side="left", padx=(0, 5))
 
         self.auto_detect_var = getattr(self, "auto_detect_var", tk.BooleanVar(value=True))
-        tk.Checkbutton(
+        self._make_toggle(
             auto_text,
-            variable=self.auto_detect_var,
+            self.auto_detect_var,
             command=self._run_auto_detect,
-            bg=c["surface"],
-            fg=c["text"],
-            activebackground=c["surface"],
-            activeforeground=c["text"],
-            selectcolor=c["surface_3"],
-            relief="flat",
-            bd=0,
-            highlightthickness=0,
         ).pack(side="left")
 
     def _build_editor_panel(self):
@@ -975,18 +1098,15 @@ class MD2PDFStudioApp:
         smart.pack(fill="x")
 
         self.mode_var = getattr(self, "mode_var", tk.StringVar(value="auto"))
-        tk.Radiobutton(
+        smart_marker = tk.Canvas(
             smart,
-            variable=self.mode_var,
-            value="auto",
-            command=self._run_auto_detect,
+            width=14,
+            height=14,
             bg=c["selected"],
-            activebackground=c["selected"],
-            selectcolor=c["accent"],
-            relief="flat",
-            bd=0,
             highlightthickness=0,
-        ).pack(side="left", padx=(9, 2), pady=9)
+            bd=0,
+        )
+        smart_marker.pack(side="left", padx=(10, 3), pady=10)
 
         copy = tk.Frame(smart, bg=c["selected"])
         copy.pack(side="left", fill="x", expand=True, padx=(1, 9), pady=8)
@@ -1009,6 +1129,20 @@ class MD2PDFStudioApp:
             justify="left",
         )
         self.detect_label.pack(anchor="w", pady=(2, 0))
+
+        def select_smart(_event=None):
+            self.mode_var.set("auto")
+            self._run_auto_detect()
+        for widget in (smart, smart_marker, copy, self.detect_label):
+            widget.bind("<Button-1>", select_smart)
+
+        def redraw_smart_marker(*_):
+            smart_marker.delete("all")
+            smart_marker.create_oval(1, 1, 13, 13, outline=c["accent"], width=1)
+            if self.mode_var.get() == "auto":
+                smart_marker.create_oval(4, 4, 10, 10, fill=c["accent"], outline=c["accent"])
+        self.mode_var.trace_add("write", redraw_smart_marker)
+        redraw_smart_marker()
 
         tk.Label(
             body,
@@ -1124,19 +1258,10 @@ class MD2PDFStudioApp:
         ).grid(row=0, column=1, sticky="e")
 
         self.open_pdf_var = getattr(self, "open_pdf_var", tk.BooleanVar(value=True))
-        tk.Checkbutton(
+        self._make_toggle(
             settings,
-            text="Open PDF automatically",
-            variable=self.open_pdf_var,
-            bg=c["surface"],
-            fg=c["text_2"],
-            activebackground=c["surface"],
-            activeforeground=c["text"],
-            selectcolor=c["surface_3"],
-            font=("Segoe UI", 8),
-            relief="flat",
-            bd=0,
-            highlightthickness=0,
+            self.open_pdf_var,
+            label="Open PDF automatically",
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(7, 0))
 
         tk.Frame(body, height=1, bg=c["border_soft"]).pack(fill="x", pady=13)
