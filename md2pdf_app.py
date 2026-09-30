@@ -133,6 +133,7 @@ class MD2PDFStudioApp:
     """Desktop workspace for Markdown → PDF conversion."""
 
     ZOOM_STEPS = (80, 90, 100, 110, 120, 130, 140, 150)
+    POINTS_PER_INCH = 72.0
 
     def __init__(self, root):
         self.root = root
@@ -189,6 +190,14 @@ class MD2PDFStudioApp:
         except (TypeError, ValueError):
             return default
         return value if value > 0 else default
+
+    @classmethod
+    def _dpi_to_tk_scaling(cls, dpi):
+        try:
+            dpi = float(dpi)
+        except (TypeError, ValueError):
+            dpi = 96.0
+        return max(1.0, dpi / cls.POINTS_PER_INCH)
 
     @staticmethod
     def _get_preferences_path():
@@ -250,26 +259,30 @@ class MD2PDFStudioApp:
             pass
 
     def _configure_display_scaling(self, initial=False):
-        """Let Windows/Tk own monitor DPI; apply only the user's UI zoom."""
+        """Use the current monitor DPI as the native baseline.
+
+        Windows/Tk own monitor DPI. UI Zoom is the only app-controlled
+        multiplier layered on top. There is no fixed 125%/200% assumption.
+        """
+        dpi = self._get_window_dpi()
+        if dpi <= 0:
+            dpi = 96
+
         if initial:
             try:
                 self.root.update_idletasks()
             except tk.TclError:
                 pass
 
-            self._current_dpi = self._get_window_dpi()
-            # Tk's current scaling is the monitor-native baseline. Do not
-            # multiply it by the Windows DPI a second time.
-            self._native_tk_scaling = self._get_tk_scaling()
+            self._current_dpi = dpi
+            self._native_tk_scaling = self._dpi_to_tk_scaling(dpi)
         else:
-            self._current_dpi = self._get_window_dpi()
-
             current_tk = self._get_tk_scaling()
             previous_zoom = max(0.01, self.zoom_percent / 100.0)
             previous_native = getattr(
                 self,
                 "_native_tk_scaling",
-                current_tk / previous_zoom,
+                self._dpi_to_tk_scaling(dpi),
             )
             previous_applied = getattr(
                 self,
@@ -277,13 +290,14 @@ class MD2PDFStudioApp:
                 previous_native * previous_zoom,
             )
 
-            # Per-Monitor V2/Tk may already have changed its native scaling
-            # when the window enters a different-DPI monitor. Capture that
-            # new native value before applying the user's zoom multiplier.
+            # Prefer a native Tk scale that Tk has already adopted. If it has
+            # not updated yet, derive it from the newly reported monitor DPI.
             if abs(current_tk - previous_applied) > 0.01:
                 self._native_tk_scaling = current_tk / previous_zoom
             else:
-                self._native_tk_scaling = previous_native
+                self._native_tk_scaling = self._dpi_to_tk_scaling(dpi)
+
+            self._current_dpi = dpi
 
         native = self._safe_float(self._native_tk_scaling)
         desired = native * (self.zoom_percent / 100.0)
