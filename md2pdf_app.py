@@ -640,7 +640,6 @@ class MD2PDFStudioApp:
             if command:
                 command()
 
-        variable.trace_add("write", redraw)
         for widget in (row, track):
             widget.bind("<Button-1>", toggle)
         if text_label:
@@ -1141,7 +1140,6 @@ class MD2PDFStudioApp:
             smart_marker.create_oval(1, 1, 13, 13, outline=c["accent"], width=1)
             if self.mode_var.get() == "auto":
                 smart_marker.create_oval(4, 4, 10, 10, fill=c["accent"], outline=c["accent"])
-        self.mode_var.trace_add("write", redraw_smart_marker)
         redraw_smart_marker()
 
         tk.Label(
