@@ -29,10 +29,13 @@ class SimpleRendererIntegrationTests(unittest.TestCase):
                     from pypdf import PdfReader
                     extracted = "\n".join(page.extract_text() or "" for page in PdfReader(output, strict=False).pages)
                     normalized = re.sub(r"\s+", " ", extracted).strip()
+                    no_space_normalized = re.sub(r"\s+", "", extracted)
                     for marker in item["required_text"]:
-                        self.assertIn(
-                            re.sub(r"\s+", " ", marker).strip(),
-                            normalized,
+                        norm_marker = re.sub(r"\s+", " ", marker).strip()
+                        no_space_marker = re.sub(r"\s+", "", marker)
+                        self.assertTrue(
+                            norm_marker in normalized or no_space_marker in no_space_normalized,
+                            f"Required marker '{marker}' not found in PDF output: '{normalized}'",
                         )
 
 

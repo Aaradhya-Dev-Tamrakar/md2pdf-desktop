@@ -24,7 +24,10 @@ class UIScalingTests(unittest.TestCase):
 
     def test_export_controls_exist_and_shortcuts_bound(self):
         import tkinter as tk
-        root = tk.Tk()
+        try:
+            root = tk.Tk()
+        except tk.TclError as exc:
+            raise unittest.SkipTest(f"Tkinter display not available in headless environment: {exc}")
         try:
             app = MD2PDFStudioApp(root)
             self.assertTrue(hasattr(app, "convert_btn"))
