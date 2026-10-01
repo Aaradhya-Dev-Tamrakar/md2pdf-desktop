@@ -14,6 +14,7 @@ from .core import (
     detect_latex_needed,
     detect_sidebar_needed,
     find_chromium,
+    find_pandoc,
     probe_latex_template,
 )
 
@@ -32,6 +33,7 @@ __all__ = [
     "detect_latex_needed",
     "detect_sidebar_needed",
     "find_chromium",
+    "find_pandoc",
     "probe_latex_template",
     "ensure_web_assets",
 ]

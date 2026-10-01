@@ -1742,15 +1742,18 @@ class MD2PDFStudioApp:
         self._set_document("", None, False)
         self._set_status("New document", self._colors()["text_2"])
 
-    def open_file(self):
-        path = filedialog.askopenfilename(
-            title="Open Markdown",
-            filetypes=[
-                ("Markdown files", "*.md *.markdown"),
-                ("Text files", "*.txt"),
-                ("All files", "*.*"),
-            ],
-        )
+    def open_file(self, target_path=None):
+        if target_path and os.path.isfile(target_path):
+            path = target_path
+        else:
+            path = filedialog.askopenfilename(
+                title="Open Markdown",
+                filetypes=[
+                    ("Markdown files", "*.md *.markdown"),
+                    ("Text files", "*.txt"),
+                    ("All files", "*.*"),
+                ],
+            )
         if not path:
             return
 
@@ -2128,6 +2131,8 @@ def main():
     _enable_windows_thread_dpi_awareness()
     root = tk.Tk()
     app = MD2PDFStudioApp(root)
+    if len(sys.argv) > 1 and os.path.isfile(sys.argv[1]):
+        app.open_file(sys.argv[1])
     root.mainloop()
 
 

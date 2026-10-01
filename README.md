@@ -95,6 +95,28 @@ Tagged releases publish a self-contained Windows x64 `md2pdf Studio` application
 - **Responsive Conversion**: PDF rendering runs in a background worker so the Tkinter editor remains interactive while conversion is in progress.
 - **Export Presets & Automation**: Quick margin dropdown (`10mm`, `14mm`, `20mm`, `0.5in`), auto-open PDF on completion, and `📁 Show in Folder` shortcut.
 
+### 🖱️ Windows Explorer Context Menu Integration
+
+Convert Markdown files directly from Windows File Explorer without opening the editor:
+
+```powershell
+# Register context menu (Current User, no admin rights required)
+.\setup_context_menu.bat
+
+# Unregister / remove anytime
+.\setup_context_menu.bat -Unregister
+```
+
+**Context Menu Features:**
+- **`Convert to PDF (md2pdf)`** — 1-click direct conversion using Smart Detect; generates `<filename>.pdf` alongside the source document and displays a non-blocking toast notice with `[Open PDF]` and `[Show in Folder]` buttons.
+- **`md2pdf Studio ▾`** — Cascading submenu for specialized workflows:
+  - *Convert with Smart Detect*
+  - *Convert with Sidebar Light*
+  - *Convert with Sidebar Dark*
+  - *Convert with LaTeX Formal*
+  - *Convert and Open PDF*
+  - *Edit in md2pdf Studio* (loads the Markdown file directly into the Studio editor)
+
 ---
 
 ## 🤖 Model Context Protocol (MCP) Server
