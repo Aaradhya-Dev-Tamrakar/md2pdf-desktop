@@ -107,15 +107,8 @@ Convert Markdown files directly from Windows File Explorer without opening the e
 .\setup_context_menu.bat -Unregister
 ```
 
-**Context Menu Features:**
+**Context Menu Feature:**
 - **`Convert to PDF (md2pdf)`** — 1-click direct conversion using Smart Detect; generates `<filename>.pdf` alongside the source document and displays a non-blocking toast notice with `[Open PDF]` and `[Show in Folder]` buttons.
-- **`md2pdf Studio ▾`** — Cascading submenu for specialized workflows:
-  - *Convert with Smart Detect*
-  - *Convert with Sidebar Light*
-  - *Convert with Sidebar Dark*
-  - *Convert with LaTeX Formal*
-  - *Convert and Open PDF*
-  - *Edit in md2pdf Studio* (loads the Markdown file directly into the Studio editor)
 
 ---
 
