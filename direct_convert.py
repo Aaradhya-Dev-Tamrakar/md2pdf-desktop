@@ -92,14 +92,22 @@ def _show_toast(pdf_path: str, backend_name: str, file_size_kb: float, elapsed: 
     filename = os.path.basename(pdf_path)
     size_text = f"{file_size_kb:.1f} KB" if file_size_kb < 1024 else f"{file_size_kb / 1024:.2f} MB"
 
+    if len(filename) > 45:
+        display_name = filename[:26] + "…" + filename[-16:]
+    else:
+        display_name = filename
+
+    scale = max(1.0, root.winfo_fpixels("1i") / 96.0)
+
     tk.Label(
         frame,
-        text=f"Exported {filename}",
+        text=f"Exported {display_name}",
         fg=fg_color,
         bg=bg_color,
         font=("Segoe UI", 10, "bold"),
         anchor="w",
-    ).pack(fill="x", padx=12, pady=(0, 2))
+        wraplength=int(380 * scale),
+    ).pack(fill="x", padx=14, pady=(0, 2))
 
     tk.Label(
         frame,
@@ -108,10 +116,10 @@ def _show_toast(pdf_path: str, backend_name: str, file_size_kb: float, elapsed: 
         bg=bg_color,
         font=("Segoe UI", 8),
         anchor="w",
-    ).pack(fill="x", padx=12, pady=(0, 10))
+    ).pack(fill="x", padx=14, pady=(0, 10))
 
     actions = tk.Frame(frame, bg=bg_color)
-    actions.pack(fill="x", padx=12, pady=(0, 10))
+    actions.pack(fill="x", padx=14, pady=(0, 12))
 
     def open_pdf(_e=None):
         try:
@@ -138,11 +146,11 @@ def _show_toast(pdf_path: str, backend_name: str, file_size_kb: float, elapsed: 
         font=("Segoe UI", 8, "bold"),
         relief="flat",
         bd=0,
-        padx=10,
-        pady=3,
+        padx=12,
+        pady=4,
         cursor="hand2",
     )
-    open_btn.pack(side="left", padx=(0, 6))
+    open_btn.pack(side="left", padx=(0, 8))
 
     folder_btn = tk.Button(
         actions,
@@ -155,22 +163,49 @@ def _show_toast(pdf_path: str, backend_name: str, file_size_kb: float, elapsed: 
         font=("Segoe UI", 8),
         relief="flat",
         bd=0,
-        padx=10,
-        pady=3,
+        padx=12,
+        pady=4,
         cursor="hand2",
     )
     folder_btn.pack(side="left")
 
     root.update_idletasks()
-    width = 340
-    height = 115
+
+    req_w = frame.winfo_reqwidth()
+    req_h = frame.winfo_reqheight()
+
+    width = max(int(400 * scale), req_w + int(28 * scale))
+    height = max(int(145 * scale), req_h + int(16 * scale))
+
     screen_w = root.winfo_screenwidth()
     screen_h = root.winfo_screenheight()
-    x = screen_w - width - 20
-    y = screen_h - height - 60
+
+    # Calculate bottom-right positioning above Windows taskbar with high-DPI scaling
+    margin_right = int(24 * scale)
+    margin_bottom = int(72 * scale)
+
+    x = max(10, screen_w - width - margin_right)
+    y = max(10, screen_h - height - margin_bottom)
     root.geometry(f"{width}x{height}+{x}+{y}")
 
-    root.after(6000, root.destroy)
+    dismiss_timer = [root.after(7000, root.destroy)]
+
+    def pause_dismiss(_e=None):
+        if dismiss_timer[0] is not None:
+            try:
+                root.after_cancel(dismiss_timer[0])
+            except tk.TclError:
+                pass
+            dismiss_timer[0] = None
+
+    def resume_dismiss(_e=None):
+        if dismiss_timer[0] is None:
+            dismiss_timer[0] = root.after(4000, root.destroy)
+
+    for widget in (root, frame, header, actions, open_btn, folder_btn):
+        widget.bind("<Enter>", pause_dismiss)
+        widget.bind("<Leave>", resume_dismiss)
+
     root.mainloop()
 
 
