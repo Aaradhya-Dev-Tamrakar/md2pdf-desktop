@@ -132,6 +132,7 @@ THEME = {
 class MD2PDFStudioApp:
     """Desktop workspace for Markdown → PDF conversion."""
 
+    DEFAULT_ZOOM = 100
     ZOOM_STEPS = (80, 90, 100, 110, 120, 130, 140, 150)
     POINTS_PER_INCH = 72.0
 
@@ -142,7 +143,7 @@ class MD2PDFStudioApp:
         prefs = self._load_preferences()
         self.theme_mode = prefs.get("theme", "dark")
         self.accent_name = prefs.get("accent", "blue")
-        self.zoom_percent = self._clamp_zoom(prefs.get("zoom", 100))
+        self.zoom_percent = self.DEFAULT_ZOOM
 
         self.root.title("md2pdf Studio")
         self.root.configure(bg="#0b0c0e")
@@ -175,13 +176,13 @@ class MD2PDFStudioApp:
     # Preferences / scaling
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _clamp_zoom(value):
+    @classmethod
+    def _clamp_zoom(cls, value):
         try:
             value = int(value)
         except (TypeError, ValueError):
-            value = 100
-        return min(MD2PDFStudioApp.ZOOM_STEPS, key=lambda x: abs(x - value))
+            value = cls.DEFAULT_ZOOM
+        return min(cls.ZOOM_STEPS, key=lambda x: abs(x - value))
 
     @staticmethod
     def _safe_float(value, default=96.0 / 72.0):
@@ -446,7 +447,7 @@ class MD2PDFStudioApp:
             self.set_zoom(self.ZOOM_STEPS[current - 1])
 
     def reset_zoom(self):
-        self.set_zoom(100)
+        self.set_zoom(self.DEFAULT_ZOOM)
 
     # ------------------------------------------------------------------
     # Theme system
