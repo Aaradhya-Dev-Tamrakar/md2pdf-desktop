@@ -130,7 +130,8 @@ def _show_toast(pdf_path: str, backend_name: str, file_size_kb: float, elapsed: 
 
     def open_folder(_e=None):
         try:
-            subprocess.Popen(["explorer", f"/select,{pdf_path}"])
+            flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            subprocess.Popen(["explorer", f"/select,{pdf_path}"], creationflags=flags)
         except OSError:
             pass
         root.destroy()

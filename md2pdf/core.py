@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -29,6 +30,14 @@ DEFAULT_PROCESS_TIMEOUT = 120
 def _run_process(args, **kwargs):
     """Run an external tool with a bounded timeout and normalized failures."""
     kwargs.setdefault("timeout", DEFAULT_PROCESS_TIMEOUT)
+    if sys.platform == "win32":
+        kwargs["creationflags"] = kwargs.get("creationflags", 0) | subprocess.CREATE_NO_WINDOW
+        startupinfo = kwargs.get("startupinfo")
+        if startupinfo is None:
+            startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
+        kwargs["startupinfo"] = startupinfo
     try:
         return subprocess.run(args, **kwargs)
     except FileNotFoundError as exc:
@@ -245,8 +254,15 @@ def detect_sidebar_needed(md_content: str):
 # ---------------------------------------------------------------------------
 # Dependency checks
 # ---------------------------------------------------------------------------
+_CACHED_PANDOC: str | None = None
+
+
 def find_pandoc() -> str | None:
     """Locate functional pandoc executable, checking known paths first."""
+    global _CACHED_PANDOC
+    if _CACHED_PANDOC and os.path.isfile(_CACHED_PANDOC):
+        return _CACHED_PANDOC
+
     candidates = [
         r"C:\Program Files\Pandoc\pandoc.exe",
         r"C:\Program Files (x86)\Pandoc\pandoc.exe",
@@ -256,19 +272,21 @@ def find_pandoc() -> str | None:
     for c in candidates:
         if os.path.isfile(c):
             try:
-                res = subprocess.run([c, "--version"], capture_output=True, text=True, timeout=5)
+                res = _run_process([c, "--version"], capture_output=True, text=True, timeout=5)
                 if res.returncode == 0:
                     p_dir = os.path.dirname(c)
                     if p_dir and p_dir not in os.environ.get("PATH", "").split(os.pathsep)[:2]:
                         os.environ["PATH"] = p_dir + os.pathsep + os.environ.get("PATH", "")
+                    _CACHED_PANDOC = c
                     return c
             except Exception:
                 pass
     p = shutil.which("pandoc")
     if p:
         try:
-            res = subprocess.run([p, "--version"], capture_output=True, text=True, timeout=5)
+            res = _run_process([p, "--version"], capture_output=True, text=True, timeout=5)
             if res.returncode == 0:
+                _CACHED_PANDOC = p
                 return p
         except Exception:
             pass
