@@ -245,6 +245,36 @@ def detect_sidebar_needed(md_content: str):
 # ---------------------------------------------------------------------------
 # Dependency checks
 # ---------------------------------------------------------------------------
+def find_pandoc() -> str | None:
+    """Locate functional pandoc executable, checking known paths first."""
+    candidates = [
+        r"C:\Program Files\Pandoc\pandoc.exe",
+        r"C:\Program Files (x86)\Pandoc\pandoc.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Pandoc\pandoc.exe"),
+        os.path.expandvars(r"%APPDATA%\Pandoc\pandoc.exe"),
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            try:
+                res = subprocess.run([c, "--version"], capture_output=True, text=True, timeout=5)
+                if res.returncode == 0:
+                    p_dir = os.path.dirname(c)
+                    if p_dir and p_dir not in os.environ.get("PATH", "").split(os.pathsep)[:2]:
+                        os.environ["PATH"] = p_dir + os.pathsep + os.environ.get("PATH", "")
+                    return c
+            except Exception:
+                pass
+    p = shutil.which("pandoc")
+    if p:
+        try:
+            res = subprocess.run([p, "--version"], capture_output=True, text=True, timeout=5)
+            if res.returncode == 0:
+                return p
+        except Exception:
+            pass
+    return None
+
+
 def find_chromium() -> str | None:
     """Locate installed Google Chrome or Microsoft Edge executable."""
     candidates = [
@@ -266,11 +296,15 @@ def find_chromium() -> str | None:
 def check_tools():
     """Return tool availability dict."""
     return {
-        "pandoc": shutil.which("pandoc") is not None,
+        "pandoc": find_pandoc() is not None,
         "wkhtmltopdf": shutil.which("wkhtmltopdf") is not None,
         "pdflatex": shutil.which("pdflatex") is not None,
         "chromium": find_chromium() is not None,
     }
+
+
+# Auto-heal PATH for pandoc on module import if a functional binary is located
+find_pandoc()
 
 
 def probe_latex_template():

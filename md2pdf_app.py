@@ -371,6 +371,14 @@ class MD2PDFStudioApp:
 
         self._restore_document(snapshot)
 
+        if hasattr(self, "convert_btn"):
+            self.convert_btn.config(
+                state="disabled" if self._conversion_in_progress else "normal"
+            )
+        if hasattr(self, "cmd_export_btn"):
+            self.cmd_export_btn.config(
+                state="disabled" if self._conversion_in_progress else "normal"
+            )
         if hasattr(self, "open_folder_btn"):
             enabled = bool(
                 self.last_output_pdf and os.path.exists(self.last_output_pdf)
@@ -959,6 +967,14 @@ class MD2PDFStudioApp:
         ):
             self._button(left, label, command).pack(side="left", padx=3)
 
+        self.cmd_export_btn = self._button(
+            left,
+            "Export",
+            self.convert,
+            primary=True,
+        )
+        self.cmd_export_btn.pack(side="left", padx=(6, 3))
+
         tk.Frame(bar, width=1, bg=c["border"]).pack(side="left", fill="y", pady=8, padx=8)
 
         self.file_label = tk.Label(
@@ -1060,7 +1076,7 @@ class MD2PDFStudioApp:
                 "Start with Markdown\n\n"
                 "# Your title\n"
                 "Write normally — headings, tables, code, math, Mermaid and alerts are supported.\n\n"
-                "Ctrl+O  Open    Ctrl+S  Save    Ctrl+Shift+E  Export\n"
+                "Ctrl+O  Open    Ctrl+S  Save    Ctrl+Shift+E / Ctrl+E  Export\n"
                 "Ctrl+Plus / Ctrl+Minus  Zoom"
             ),
             bg=c["input"],
@@ -1313,6 +1329,41 @@ class MD2PDFStudioApp:
             label="Open PDF automatically",
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(7, 0))
 
+        action_frame = tk.Frame(body, bg=c["surface"])
+        action_frame.pack(fill="x", pady=(14, 0))
+
+        self.progress = ttk.Progressbar(
+            action_frame,
+            style="MD.Horizontal.TProgressbar",
+            mode="indeterminate",
+        )
+        self.progress.pack(fill="x", pady=(0, 10))
+
+        action_btns = tk.Frame(action_frame, bg=c["surface"])
+        action_btns.pack(fill="x")
+
+        self.convert_btn = self._button(
+            action_btns,
+            "🚀 Export to PDF",
+            self.convert,
+            primary=True,
+        )
+        self.convert_btn.pack(side="left", fill="x", expand=True, padx=(0, 6))
+
+        self.open_folder_btn = self._button(
+            action_btns,
+            "📁 Open Folder",
+            self.open_output_folder,
+            primary=False,
+        )
+        self.open_folder_btn.pack(side="right")
+        enabled = bool(
+            self.last_output_pdf and os.path.exists(self.last_output_pdf)
+        )
+        self.open_folder_btn.config(
+            state="normal" if enabled else "disabled"
+        )
+
         tk.Frame(body, height=1, bg=c["border_soft"]).pack(fill="x", pady=13)
 
         env_head = tk.Frame(body, bg=c["surface"])
@@ -1380,7 +1431,7 @@ class MD2PDFStudioApp:
         )
         self.status.pack(side="left")
 
-        hint = "Ctrl+Shift+E Export  ·  Ctrl+0 Reset Zoom"
+        hint = "Ctrl+Shift+E / Ctrl+E Export  ·  Ctrl+0 Reset Zoom"
         tk.Label(
             bar,
             text=hint,
@@ -1860,8 +1911,12 @@ class MD2PDFStudioApp:
         open_pdf_after = bool(self.open_pdf_var.get())
 
         self._conversion_in_progress = True
-        self.convert_btn.config(state="disabled")
-        self.progress.start(8)
+        if hasattr(self, "convert_btn"):
+            self.convert_btn.config(state="disabled")
+        if hasattr(self, "cmd_export_btn"):
+            self.cmd_export_btn.config(state="disabled")
+        if hasattr(self, "progress"):
+            self.progress.start(8)
 
         self._set_status(
             f"Exporting with {self._friendly_mode_name(mode)}…",
@@ -1926,8 +1981,12 @@ class MD2PDFStudioApp:
 
     def _finish_conversion(self, result):
         self._conversion_in_progress = False
-        self.convert_btn.config(state="normal")
-        self.progress.stop()
+        if hasattr(self, "convert_btn"):
+            self.convert_btn.config(state="normal")
+        if hasattr(self, "cmd_export_btn"):
+            self.cmd_export_btn.config(state="normal")
+        if hasattr(self, "progress"):
+            self.progress.stop()
 
         if not result["ok"]:
             self._set_status("Export failed.", self._colors()["danger"])
@@ -1936,7 +1995,8 @@ class MD2PDFStudioApp:
 
         save_path = result["save_path"]
         self.last_output_pdf = save_path
-        self.open_folder_btn.config(state="normal")
+        if hasattr(self, "open_folder_btn"):
+            self.open_folder_btn.config(state="normal")
 
         size_kb = result["file_size_kb"]
         size_text = f"{size_kb:.1f} KB" if size_kb < 1024 else f"{size_kb / 1024:.2f} MB"
@@ -1999,11 +2059,30 @@ class MD2PDFStudioApp:
                 self._open_path(os.path.dirname(os.path.abspath(output)))
 
     def _bind_shortcuts(self):
+        def _export_cmd(_e=None):
+            self.convert()
+            return "break"
+
+        def _save_cmd(_e=None):
+            self.save_file()
+            return "break"
+
         self.root.bind("<Control-o>", lambda _e: self.open_file())
-        self.root.bind("<Control-s>", lambda _e: self.save_file())
         self.root.bind("<Control-n>", lambda _e: self.new_document())
-        self.root.bind("<Control-Shift-E>", lambda _e: self.convert())
-        self.root.bind("<Control-Shift-e>", lambda _e: self.convert())
+
+        for seq in ("<Control-s>", "<Control-S>"):
+            self.root.bind_all(seq, _save_cmd)
+
+        for seq in (
+            "<Control-Shift-E>",
+            "<Control-Shift-e>",
+            "<Control-Key-E>",
+            "<Control-Key-e>",
+            "<Control-Key-P>",
+            "<Control-Key-p>",
+        ):
+            self.root.bind_all(seq, _export_cmd)
+
         self.root.bind("<Control-KeyPress-equal>", lambda _e: self.zoom_in())
         self.root.bind("<Control-KeyPress-plus>", lambda _e: self.zoom_in())
         self.root.bind("<Control-KeyPress-minus>", lambda _e: self.zoom_out())

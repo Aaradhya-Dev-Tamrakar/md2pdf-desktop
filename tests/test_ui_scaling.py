@@ -22,6 +22,33 @@ class UIScalingTests(unittest.TestCase):
             self.assertAlmostEqual(native * (100 / 100), native)
             self.assertAlmostEqual(native * (120 / 100), native * 1.2)
 
+    def test_export_controls_exist_and_shortcuts_bound(self):
+        import tkinter as tk
+        root = tk.Tk()
+        try:
+            app = MD2PDFStudioApp(root)
+            self.assertTrue(hasattr(app, "convert_btn"))
+            self.assertTrue(hasattr(app, "cmd_export_btn"))
+            self.assertTrue(hasattr(app, "open_folder_btn"))
+            self.assertTrue(hasattr(app, "progress"))
+
+            calls = []
+            app.convert = lambda: calls.append(1)
+            root.update()
+            app.text.focus_set()
+
+            # Test shortcuts from text editor focus
+            app.text.event_generate("<Control-Key-E>", state=0x5)
+            root.update()
+            app.text.event_generate("<Control-Key-e>", state=0x4)
+            root.update()
+            app.text.event_generate("<Control-Key-p>", state=0x4)
+            root.update()
+
+            self.assertEqual(len(calls), 3)
+        finally:
+            root.destroy()
+
 
 if __name__ == "__main__":
     unittest.main()

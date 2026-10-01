@@ -24,3 +24,6 @@ md2pdf = ["templates/*.latex", "templates/*.lua"]
 Homepage = "https://github.com/Aaradhya-Dev-Tamrakar/md2pdf-desktop"
 Repository = "https://github.com/Aaradhya-Dev-Tamrakar/md2pdf-desktop"
 Issues = "https://github.com/Aaradhya-Dev-Tamrakar/md2pdf-desktop/issues"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
